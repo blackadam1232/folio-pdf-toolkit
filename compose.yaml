@@ -1,0 +1,48 @@
+services:
+  folio:
+    build: .
+    restart: unless-stopped
+    environment:
+      FOLIO_MODE: web
+      FOLIO_ORIGIN: https://${FOLIO_DOMAIN:?Set FOLIO_DOMAIN in .env}
+      FOLIO_DATA: /data
+      FOLIO_QUOTA_MB: ${FOLIO_QUOTA_MB:-20480}
+      FOLIO_WORKER_MEMORY_MB: 2048
+      FOLIO_JOB_SECONDS: 1800
+    volumes:
+      - folio-data:/data
+    networks: [private]
+    read_only: true
+    tmpfs: [/tmp:size=512m,mode=1777]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 3g
+    cpus: 2
+    pids_limit: 128
+    healthcheck:
+      test: [CMD, python, -c, "import os,urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/health',headers={'Host':os.environ['FOLIO_ORIGIN'].split('//')[1]}); urllib.request.urlopen(r,timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      FOLIO_DOMAIN: ${FOLIO_DOMAIN}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [private, public]
+    depends_on:
+      folio:
+        condition: service_healthy
+networks:
+  private:
+    internal: true
+  public:
+volumes:
+  folio-data:
+  caddy-data:
+  caddy-config:

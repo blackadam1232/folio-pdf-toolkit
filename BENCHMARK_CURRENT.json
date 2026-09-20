@@ -1,0 +1,11 @@
+{
+  "platform": "Linux-6.18.44-x86_64-with-glibc2.39",
+  "python": "3.12.14",
+  "count": 5000,
+  "fixture": "Repeated 256x192 solid-color JPEG; no uploads or UI measured",
+  "seconds": 1.173,
+  "output_bytes": 9573095,
+  "pages": 5000,
+  "validation": "strict page count plus PDFium first/last rendering",
+  "peak_process_rss_mib": 82.99
+}

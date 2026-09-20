@@ -1,0 +1,32 @@
+{
+  "Screen/Mobile": {
+    "profile": "Screen/Mobile",
+    "pages": 10,
+    "file_bytes": 1418912,
+    "file_size_mb": 1.35,
+    "conversion_seconds": 1.169,
+    "time_to_first_page_sec": 0.0004,
+    "total_render_scroll_sec": 0.1608,
+    "avg_page_render_ms": 16.08
+  },
+  "Print": {
+    "profile": "Print",
+    "pages": 10,
+    "file_bytes": 4157198,
+    "file_size_mb": 3.96,
+    "conversion_seconds": 0.512,
+    "time_to_first_page_sec": 0.0004,
+    "total_render_scroll_sec": 0.1463,
+    "avg_page_render_ms": 14.63
+  },
+  "Original": {
+    "profile": "Original",
+    "pages": 10,
+    "file_bytes": 4429475,
+    "file_size_mb": 4.22,
+    "conversion_seconds": 0.266,
+    "time_to_first_page_sec": 0.0003,
+    "total_render_scroll_sec": 0.4064,
+    "avg_page_render_ms": 40.64
+  }
+}
