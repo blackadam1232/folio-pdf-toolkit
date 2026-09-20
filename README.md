@@ -1,69 +1,139 @@
-# Folio PDF Toolkit
+# Folio — Private Browser PDF Toolkit
 
-An independently authored, mobile-first PDF and image workspace deployable to **Vercel** with S3-compatible cloud storage, or runnable as a standalone offline desktop application with zero cloud dependencies.
-
----
-
-## Key Highlights & User Priorities
-
-1. **Correct Vercel Deployment**:
-   - Static React / Vite edge frontend with serverless FastAPI API (`api/index.py`).
-   - S3-compatible pre-signed direct upload and download flow (Cloudflare R2 / AWS S3) to bypass Vercel's 4.5 MB request limit.
-   - Dual-mode database: SQLite for local desktop mode (`start.bat` / `start.sh`) and PostgreSQL (Neon / Supabase) for hosted cloud deployments.
-2. **Fast PDF Opening & Smooth 60fps Scrolling**:
-   - **Quality Profiles**:
-     - `Screen/Mobile` (Default): ~150 DPI target resolution, bound 1800px, JPEG quality 82 with 4:2:0 subsampling. File size is reduced by **68%**, and viewer memory footprint drops from 36 MB to ~3–5 MB per page, ensuring smooth scrolling on mobile devices and laptops without crashes.
-     - `Print`: ~300 DPI target resolution, bound 3600px, JPEG quality 92 with 4:2:2 subsampling.
-     - `Original`: Preserves exact pixels and original quality.
-   - **Balanced Page Tree**: Replaces flat `/Kids` arrays with hierarchical B-Trees (branching factor 32) for documents with >32 pages, enabling instant seek and navigation in PDF readers (Adobe Acrobat, Chrome PDFium, Apple Preview).
-   - **SHA-256 Resource Deduplication**: Repeated or duplicate images share the same internal PDF `/XObject` stream, eliminating redundant megabytes from final documents.
-   - **Elimination of Raw Flate RGB Bloat**: Eliminates decompression memory spikes in PDF viewers.
-3. **Mobile-First Responsive Interface**:
-   - Tested and fully responsive from **320px to 1440px** (320, 360, 390, 430, 768, 1024, 1440px).
-   - Touch-friendly controls: Move Up (▲) / Move Down (▼) buttons and numerical position jump inputs in addition to drag-and-drop.
-   - Safe-area insets (`env(safe-area-inset-bottom)`) for modern mobile browsers.
-   - 16px minimum font size on mobile inputs to prevent iOS Safari auto-zoom.
-   - Virtualized file lists and cancelable on-demand preview generation.
-4. **Secure User Accounts & Document Privacy**:
-   - Invitation-only account creation, Argon2id password hashing, single-use expiring reset/invite tokens.
-   - Strict owner authorization (`WHERE owner = ?`) on every asset, job, and download.
-   - Magic byte header inspection on uploads (`%PDF-`, PNG, JPEG, WebP) to block malicious polyglots.
-   - Rate limiting on authentication routes (both by IP and email).
-5. **Preserved PDF Tooling**:
-   - All 11 tools preserved: Images to PDF, Merge, Extract, Split, Organize, Render to PNG/JPEG, Compress, Page Numbers, Watermark, Password Protect, and Password Unlock.
-   - Multi-directional sorting (Natural filename, Natural descending, Filename A-Z, Filename Z-A, Date modified, Newest first, Manual).
-   - Post-completion margin and settings adjustments creating clean new revisions.
+> **100% Client-Side Image-to-PDF Application**  
+> Fast, private document binding running entirely inside your browser. No Python backend, no database, no cloud storage, and zero server uploads.
 
 ---
 
-## Quick Start: Local Mode (Windows / macOS / Linux)
+## Key Features
 
-### Windows
-```bat
-start.bat
-```
-The first launch automatically creates `.venv` and installs dependencies. Later launches work completely offline.
+- **Zero-Upload Privacy Guarantee**: All image processing and PDF compilation happens on the visitor's device using standard Web APIs and `pdf-lib`. No files or metadata leave the browser.
+- **Complete Image-to-PDF Workflow**:
+  - Multi-image selection, desktop drag-and-drop, and mobile file picker.
+  - Adding more images without losing the current selection.
+  - Live preview canvas showing exact page geometry, margins, and fitting before exporting.
+  - Touch-friendly arrangement: Move Up (▲) / Move Down (▼) buttons, direct position entry, desktop drag-and-drop.
+  - Natural numeric sorting (1, 2, 10 vs 10, 2, 1), alphabetical (A–Z, Z–A), and date modified (oldest/newest).
+  - Per-image 90° clockwise rotation.
+- **Customizable PDF Settings**:
+  - Page sizes: **A4**, **US Letter**, and **Original** (image-sized pages).
+  - Orientations: **Auto** (matches image shape), **Portrait**, and **Landscape**.
+  - Fitting: **Contain** (letterbox), **Cover** (crop overflow), and **Original** (1:1 native resolution).
+  - Margin presets: None (0 mm), Small (5 mm), Medium (10 mm), Large (20 mm), or Custom top/right/bottom/left in millimeters with bounds validation.
+  - Quality profiles: **Screen/Mobile** (150 DPI · compact), **Print** (300 DPI · high quality), and **Original** (source pixels).
+  - Editable output filename.
+- **Post-Conversion Reactivity**:
+  - Downloading does **not** lock settings or clear selected files.
+  - Changing settings flags previous outputs as "Settings Changed" and surfaces a 1-click "Update PDF" button.
+  - Real `application/pdf` Blob download verified with standard PDF headers and trailers.
+- **Mobile-First Responsive Design**:
+  - Touch targets $\ge 44 \times 44\text{ px}$.
+  - Zero horizontal overflow across 320px, 360px, 390px, 430px, 768px, 1024px, and 1440px viewports.
+  - Bottom conversion bar respects phone safe areas (`env(safe-area-inset-bottom)`).
 
-### Linux / macOS
+---
+
+## Supported Formats & Device Safety Limits
+
+### Supported Formats
+- **JPEG** (`.jpg`, `.jpeg`, `image/jpeg`)
+- **PNG** (`.png`, `image/png`) — with automatic alpha channel flattening onto white for clean PDF output
+- **WebP** (`.webp`, `image/webp`)
+
+*Unsupported formats (e.g. BMP, TIFF, GIF, HEIC) are rejected gracefully with helpful guidance.*
+
+### Device Limits
+- **Maximum files per batch**: 150 images
+- **Maximum total input bytes**: 300 MB
+- **Maximum resolution per image**: 40 Megapixels ($40{,}000{,}000\text{ pixels}$)
+
+---
+
+## Beginner-Friendly Windows Setup Guide
+
+### 1. Extract the ZIP
+Extract `Folio_Browser_PDF_Toolkit.zip` to a folder on your computer (e.g., `C:\Projects\Folio`).
+
+### 2. Install Node.js
+Ensure Node.js is installed (Node.js v20.x or newer is recommended).  
+Download Node.js from [nodejs.org](https://nodejs.org/) if not already installed.
+
+### 3. Open Command Prompt or PowerShell
+1. Open the project folder in Windows Explorer.
+2. Click on the address bar, type `cmd` or `powershell`, and press **Enter**.
+
+### 4. Install Dependencies and Run Locally
 ```bash
-bash start.sh
+# 1. Install dependencies
+npm install
+
+# 2. Run the local development server
+npm run dev
+```
+Open your browser to `http://localhost:5173`. You can now select images, adjust settings, preview the layout, and generate PDFs!
+
+### 5. Other Useful Commands
+```bash
+# Run automated tests
+npm test
+
+# Run TypeScript type check
+npm run type-check
+
+# Build for production
+npm run build
+
+# Preview production build locally
+npm run preview
 ```
 
 ---
 
-## Cloud Deployment (Vercel + S3 + PostgreSQL)
+## Vercel Static Deployment Guide
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for full instructions:
-1. Push to GitHub.
-2. Import repository into [Vercel](https://vercel.com/new).
-3. Set environment variables (`FOLIO_MODE=web`, `FOLIO_ORIGIN`, `DATABASE_URL`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`).
-4. Run the dedicated worker daemon (`python -m backend.worker_service`) on Railway, Fly.io, or Docker.
+Folio is designed to deploy to Vercel as a pure static frontend with **zero configuration, zero API keys, and zero serverless functions**.
+
+### Exact Deployment Settings
+- **Framework Preset**: `Vite`
+- **Root Directory**: `./` (project root)
+- **Build Command**: `npm run build`
+- **Output Directory**: `dist`
+- **Environment Variables**: *None required*
+
+### Step-by-Step Vercel Deployment
+
+1. **Push to GitHub**:
+   Initialize a git repository and push the project to your GitHub account:
+   ```bash
+   git init
+   git add .
+   git commit -m "Initial commit: Browser-only Folio PDF Toolkit"
+   git branch -M main
+   git remote add origin https://github.com/<your-username>/<your-repo>.git
+   git push -u origin main
+   ```
+
+2. **Import into Vercel**:
+   - Log into your [Vercel Dashboard](https://vercel.com).
+   - Click **Add New…** → **Project**.
+   - Select your GitHub repository.
+
+3. **Confirm Settings & Deploy**:
+   - Vercel automatically detects the **Vite** framework preset.
+   - Confirm Build Command is `npm run build` and Output Directory is `dist`.
+   - Click **Deploy**.
+
+4. **Verify Live Deployment**:
+   - Once deployed, visit the production URL provided by Vercel.
+   - Select multiple photos, adjust settings, and download the resulting PDF. All conversion runs client-side in your browser!
 
 ---
 
-## Performance & Security Documentation
+## Production Security & Headers
 
-- **[BENCHMARK_REPORT.md](BENCHMARK_REPORT.md)**: Empirical measurements of file size, peak memory, and scrolling times.
-- **[SECURITY_FINDINGS.md](SECURITY_FINDINGS.md)**: Security audit, risk assessment, and threat mitigation details.
-- **[DEPLOYMENT.md](DEPLOYMENT.md)**: Production deployment architecture and step-by-step setup.
-- **[PROVENANCE.md](PROVENANCE.md)**: Authorship, architecture decisions, and third-party license notices.
+The included `vercel.json` applies strict security headers:
+- `Content-Security-Policy`: Restricts scripts and connections to origin only.
+- `X-Frame-Options: DENY`: Prevents clickjacking.
+- `X-Content-Type-Options: nosniff`: Prevents MIME-sniffing.
+- `Referrer-Policy: strict-origin-when-cross-origin`: Protects referrer headers.
+- `Permissions-Policy`: Disables camera, microphone, and geolocation.
