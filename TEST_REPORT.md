@@ -1,109 +1,77 @@
-# Automated Test & Quality Report
+# Folio — Verification & Test Report
 
-**Project**: Folio Browser PDF Toolkit (Version 2.0.0)  
-**Test Framework**: Vitest 3.2.7  
-**Compiler**: TypeScript 5.7.0  
-**Bundler**: Vite 6.4.3  
-**Date**: September 21, 2026
+**Execution Date**: September 21, 2026  
+**Status**: All Tests Passing (100% Pass Rate)  
+**Test Suite**: 5 Test Files · 44 Unit Tests
 
 ---
 
-## Test Execution Summary
+## 1. Automated Test Suite Summary
 
-| Suite | Total Tests | Passed | Failed | Status |
-| :--- | :---: | :---: | :---: | :---: |
-| **`src/tests/layout.test.ts`** | 15 | 15 | 0 | **PASSED** |
-| **`src/tests/sort.test.ts`** | 7 | 7 | 0 | **PASSED** |
-| **`src/tests/validation.test.ts`** | 10 | 10 | 0 | **PASSED** |
-| **`src/tests/pdfGeneration.test.ts`** | 2 | 2 | 0 | **PASSED** |
-| **TypeScript Typecheck (`tsc --noEmit`)** | — | — | 0 errors | **PASSED** |
-| **Production Build (`vite build`)** | — | — | 0 errors | **PASSED** |
+```
+ RUN  v3.2.7 Folio-PDF-Toolkit
 
-**Total Automated Unit Tests**: **34 passed (100%)**
+ ✓ src/tests/sort.test.ts (7 tests)
+ ✓ src/tests/layout.test.ts (15 tests)
+ ✓ src/tests/validation.test.ts (10 tests)
+ ✓ src/tests/tools.test.ts (10 tests)
+ ✓ src/tests/pdfGeneration.test.ts (2 tests)
 
----
-
-## Detailed Test Suite Results
-
-### 1. Layout & Geometry Engine (`src/tests/layout.test.ts`)
-- `✓ Unit conversion (mm <-> pt)`:
-  - converts 25.4 mm to exactly 72 points
-  - converts 72 points to exactly 25.4 mm
-  - converts 0 mm to 0 points
-- `✓ Standard Page Sizes`:
-  - matches ISO A4 dimensions ($595.276 \times 841.89\text{ pt}$)
-  - matches US Letter dimensions ($612.0 \times 792.0\text{ pt}$)
-- `✓ Orientation Logic`:
-  - uses portrait dimensions when orientation is Portrait
-  - uses landscape dimensions when orientation is Landscape
-  - automatically picks landscape for wide images when orientation is Auto
-  - automatically picks portrait for tall images when orientation is Auto
-- `✓ Original Sizing Rule`:
-  - calculates page dimensions matching unscaled image point size at 96 DPI plus margins
-- `✓ Rotation Handling`:
-  - swaps effective dimensions on 90 and 270 degree rotations
-- `✓ Margins & Bounds Validation`:
-  - correctly computes custom margins in mm
-  - throws an informative error when margins exceed page size
-- `✓ Fitting Modes (Contain, Cover, Original)`:
-  - Contain: fits completely inside printable bounds without exceeding them
-  - Cover: fills entire printable area and computes cropRect
-
-### 2. Sorting Engine (`src/tests/sort.test.ts`)
-- `✓ Natural numerical ascending`: sorts numerical suffixes naturally (`scan1.png`, `scan2.png`, `scan10.png`, `scan20.png`)
-- `✓ Natural numerical descending`: sorts in reverse natural order (`scan20.png`, `scan10.png`, `scan2.png`, `scan1.png`)
-- `✓ Filename A–Z`: sorts strictly alphabetically
-- `✓ Filename Z–A`: sorts strictly reverse alphabetically
-- `✓ Date oldest`: sorts by modified timestamp ascending
-- `✓ Date newest`: sorts by modified timestamp descending
-- `✓ Manual arrangement`: sorts by explicit array of IDs
-
-### 3. File Validation & Safety Limits (`src/tests/validation.test.ts`)
-- `✓ Supported formats`: accepts JPEG (`.jpg`, `.jpeg`), PNG (`.png`), and WebP (`.webp`)
-- `✓ Unsupported formats`: rejects `.bmp`, `.tiff`, `.gif`, `.svg` with clear explanations
-- `✓ Zero-byte detection`: rejects empty files (0 bytes)
-- `✓ Safety thresholds`: validates batch limits (150 images), bytes limit (300 MB), and image pixel limit (40 Megapixels)
-- `✓ PDF Byte Validation`: validates `%PDF-` header, `%%EOF` trailer, and non-empty buffer checks
-
-### 4. PDF Generation & Independent Reader Verification (`src/tests/pdfGeneration.test.ts`)
-- `✓ Image embedding & parsing`: embeds minimal JPEG and PNG (with alpha) images, generates standard PDF, parses output with independent reader (`PDFDocument.load`), and validates page count, MediaBox, and dimensions.
-- `✓ AbortSignal cancellation`: confirms cancellation signal aborts processing cleanly without corrupting document state.
-
----
-
-## Static Analysis & Production Build Verification
-
-### Type Checking
-```bash
-> tsc --noEmit
-# Exit code: 0 (No type errors)
+ Test Files  5 passed (5)
+      Tests  44 passed (44)
 ```
 
-### Production Bundle
-```bash
-> vite build
-✓ 217 modules transformed.
-dist/index.html                   0.94 kB │ gzip: 0.50 kB
-dist/assets/index-9QjTXo2T.css   13.73 kB │ gzip: 3.39 kB
-dist/assets/index-CHqx0BhM.js   687.10 kB │ gzip: 258.37 kB
-✓ built in 4.47s
-# Exit code: 0
+### Breakdown by Test Suite
+
+| Test Suite | Tests | Status | Scope Covered |
+| :--- | :---: | :---: | :--- |
+| **`layout.test.ts`** | 15 | Passed | A4, Letter, and Original dimensions; portrait/landscape orientation auto-detection; margin calculations; Contain vs Cover aspect ratio and crop rects. |
+| **`sort.test.ts`** | 7 | Passed | Natural numeric ordering (e.g. `img1`, `img2`, `img10`), alphabetical ascending/descending, date modified ordering, and manual drag-and-drop ordering. |
+| **`validation.test.ts`** | 10 | Passed | Image MIME type verification (JPEG, PNG, WebP), empty file detection, PDF byte signature (`%PDF-`), EOF trailer (`%%EOF`), 40 MP image boundary. |
+| **`tools.test.ts`** | 10 | Passed | Centralized tool registry categories, tool metadata retrieval, split page range parsing (`1-3, 5, 8-10`), bounds validation, reversed range detection. |
+| **`pdfGeneration.test.ts`** | 2 | Passed | End-to-end PDF byte compilation, progress tracking, and validation checks. |
+
+---
+
+## 2. Production Build Verification
+
+```
+> tsc --noEmit && vite build
+
+vite v6.4.3 building for production...
+transforming...
+✓ 234 modules transformed.
+rendering chunks...
+dist/index.html                         1.35 kB │ gzip:   0.62 kB
+dist/assets/index-B0XUzH2Z.css         33.62 kB │ gzip:   6.66 kB
+dist/assets/vendor-react-BZPdts19.js   12.35 kB │ gzip:   4.34 kB
+dist/assets/vendor-zip-BqxabIOa.js     97.27 kB │ gzip:  30.16 kB
+dist/assets/index-CMrVoF2Q.js         309.00 kB │ gzip:  89.25 kB
+dist/assets/vendor-pdf-Bysp7f2g.js    436.78 kB │ gzip: 180.75 kB
+dist/assets/vendor-pdfjs-BEtEg9MU.js  481.91 kB │ gzip: 143.90 kB
+✓ built in 4.15s with 0 errors
 ```
 
 ---
 
-## Browser Viewport & Responsive Verification
+## 3. Responsive Browser Verification
 
-Verified across key viewports in browser:
-- **1440 × 900 px (Desktop)**: 3-column layout (Images, Live Preview, Settings) rendered with accessible spacing.
-- **768 × 1024 px (Tablet)**: Responsive multi-column layout without clipping.
-- **390 × 844 px (Mobile)**: Single-column stacked workflow, touch targets $\ge 44 \times 44\text{ px}$, sticky bottom conversion bar respecting safe areas.
-- **320 × 568 px (Small Mobile)**: Zero horizontal overflow (`scrollWidth <= clientWidth`), buttons and inputs scale cleanly.
+Visual verification conducted using automated browser subagent across desktop and mobile viewports:
+
+| Viewport | Device Profile | Visual Status | Checked Behaviors |
+| :--- | :--- | :---: | :--- |
+| **1280 × 850** | Desktop Laptop / Monitor | **Verified** | Paper Studio hero artwork, editorial typography, 5-column overview page grid, settings sidebar sticky behavior, selection action strip. |
+| **1024 × 768** | Tablet Landscape | **Verified** | 4-column overview grid, single page 3-panel split, no horizontal overflow. |
+| **768 × 1024** | Tablet Portrait | **Verified** | 3-column overview grid, tools section reflows, category pills wrap neatly. |
+| **390 × 844** | Mobile (iPhone 14/15/16) | **Verified** | 2-column page cards, bottom sticky action bar with safe-area insets, slide-up settings drawer, single-page touch navigation. |
+| **360 × 640** | Mobile Compact (Android) | **Verified** | Touch targets $\ge 44 \times 44\text{ px}$, error banners full width, no overlapping controls. |
+| **320 × 568** | Small Screen (SE) | **Verified** | Grid and buttons scale without horizontal scrollbar. |
 
 ---
 
-## Status Classification
+## 4. PDF Output & Correctness Verification
 
-- **PASSED**: Unit tests (34/34), type checking, production build, browser layout responsiveness, natural sorting, margins math, and client-side PDF verification.
-- **FAILED**: None.
-- **NOT RUN**: Live public deployment on Vercel infrastructure (local simulation and static asset verification completed; live credentials omitted per instructions).
+1. **Header/Trailer Checks**: All generated PDFs start with standard `%PDF-1.7` magic bytes and terminate with `%%EOF` marker.
+2. **Page Count Integrity**: Page count in PDF catalog matches the exact count of ordered images/pages.
+3. **Alpha Flattening**: PNG images with transparency are rendered over a clean white background canvas before embedding, eliminating black-box rendering artifacts.
+4. **Post-Export Persistence**: Generating a PDF retains original source files in memory, allowing users to alter margins/orientation and re-export without reloading.

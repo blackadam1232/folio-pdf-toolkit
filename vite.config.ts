@@ -13,6 +13,8 @@ export default defineConfig({
       output: {
         manualChunks: {
           "vendor-pdf": ["pdf-lib"],
+          "vendor-pdfjs": ["pdfjs-dist"],
+          "vendor-zip": ["jszip"],
           "vendor-react": ["react", "react-dom"],
         },
       },

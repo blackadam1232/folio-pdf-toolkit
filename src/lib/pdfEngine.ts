@@ -396,3 +396,339 @@ export async function generatePdf(
     isOutdated: false,
   };
 }
+
+/**
+ * Inspects a PDF file and returns page count and metadata.
+ */
+export async function inspectPdfFile(file: File): Promise<{ pageCount: number; title?: string }> {
+  const buffer = await file.arrayBuffer();
+  const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+  if (pdfDoc.isEncrypted) {
+    throw new Error(`"${file.name}" is password protected or encrypted. Folio does not bypass PDF encryption.`);
+  }
+  return {
+    pageCount: pdfDoc.getPageCount(),
+    title: pdfDoc.getTitle(),
+  };
+}
+
+/**
+ * Merges multiple PDF files in order into a single PDF document.
+ */
+export async function mergePdfs(files: File[]): Promise<{ bytes: Uint8Array; pageCount: number }> {
+  if (files.length < 2) {
+    throw new Error("Please select at least 2 PDF files to merge.");
+  }
+
+  const mergedDoc = await PDFDocument.create();
+
+  for (const file of files) {
+    const buffer = await file.arrayBuffer();
+    const sourceDoc = await PDFDocument.load(buffer);
+    if (sourceDoc.isEncrypted) {
+      throw new Error(`"${file.name}" is encrypted and cannot be merged.`);
+    }
+    const pageIndices = sourceDoc.getPageIndices();
+    const copiedPages = await mergedDoc.copyPages(sourceDoc, pageIndices);
+    copiedPages.forEach((page) => mergedDoc.addPage(page));
+  }
+
+  const bytes = await mergedDoc.save();
+  return {
+    bytes,
+    pageCount: mergedDoc.getPageCount(),
+  };
+}
+
+/**
+ * Parses and validates a page range expression like "1-3, 5, 8-10".
+ * Returns 0-based unique page indices.
+ */
+export function parsePageRange(rangeStr: string, totalPages: number): number[] {
+  if (!rangeStr.trim()) {
+    throw new Error("Page range expression cannot be empty.");
+  }
+
+  const parts = rangeStr.split(",").map((p) => p.trim()).filter(Boolean);
+  if (!parts.length) {
+    throw new Error("Invalid page range expression.");
+  }
+
+  const resultIndices = new Set<number>();
+
+  for (const part of parts) {
+    if (part.includes("-")) {
+      const bounds = part.split("-").map((b) => b.trim());
+      if (bounds.length !== 2) {
+        throw new Error(`Invalid range segment "${part}". Use format: "start-end" (e.g. 1-5).`);
+      }
+      const start = parseInt(bounds[0], 10);
+      const end = parseInt(bounds[1], 10);
+
+      if (isNaN(start) || isNaN(end)) {
+        throw new Error(`Non-numeric page range "${part}".`);
+      }
+      if (start < 1) {
+        throw new Error(`Page numbers must start at 1 or greater (got ${start}).`);
+      }
+      if (start > end) {
+        throw new Error(`Reversed page range "${part}": start (${start}) cannot be greater than end (${end}).`);
+      }
+      if (end > totalPages) {
+        throw new Error(`Page ${end} exceeds total document pages (${totalPages}).`);
+      }
+
+      for (let p = start; p <= end; p++) {
+        resultIndices.add(p - 1);
+      }
+    } else {
+      const pageNum = parseInt(part, 10);
+      if (isNaN(pageNum)) {
+        throw new Error(`Invalid page specification "${part}". Expected a number or range.`);
+      }
+      if (pageNum < 1 || pageNum > totalPages) {
+        throw new Error(`Page ${pageNum} is out of bounds (document has ${totalPages} pages).`);
+      }
+      resultIndices.add(pageNum - 1);
+    }
+  }
+
+  return Array.from(resultIndices).sort((a, b) => a - b);
+}
+
+/**
+ * Splits a PDF by page ranges into a single extracted PDF or multiple individual PDFs.
+ */
+export async function splitPdf(
+  file: File,
+  rangeStr: string
+): Promise<{ singlePdf: Uint8Array; splitFiles: { name: string; bytes: Uint8Array }[] }> {
+  const buffer = await file.arrayBuffer();
+  const sourceDoc = await PDFDocument.load(buffer);
+  const totalPages = sourceDoc.getPageCount();
+
+  const selectedIndices = parsePageRange(rangeStr, totalPages);
+  if (selectedIndices.length === 0) {
+    throw new Error("No valid pages selected for extraction.");
+  }
+
+  // Generate single extracted PDF
+  const combinedDoc = await PDFDocument.create();
+  const copiedPages = await combinedDoc.copyPages(sourceDoc, selectedIndices);
+  copiedPages.forEach((p) => combinedDoc.addPage(p));
+  const singlePdf = await combinedDoc.save();
+
+  // Generate individual split files for zip / multi-download
+  const splitFiles: { name: string; bytes: Uint8Array }[] = [];
+  const baseName = file.name.replace(/\.[^/.]+$/, "");
+
+  for (let i = 0; i < selectedIndices.length; i++) {
+    const pageIndex = selectedIndices[i];
+    const indDoc = await PDFDocument.create();
+    const [page] = await indDoc.copyPages(sourceDoc, [pageIndex]);
+    indDoc.addPage(page);
+    const bytes = await indDoc.save();
+    splitFiles.push({
+      name: `${baseName}_page_${pageIndex + 1}.pdf`,
+      bytes,
+    });
+  }
+
+  return { singlePdf, splitFiles };
+}
+
+/**
+ * Rotates pages in a PDF document by 90, 180, or 270 degrees.
+ */
+export async function rotatePdf(
+  file: File,
+  angleDeg: 90 | 180 | 270,
+  pageIndices?: number[]
+): Promise<Uint8Array> {
+  const buffer = await file.arrayBuffer();
+  const doc = await PDFDocument.load(buffer);
+  const totalPages = doc.getPageCount();
+
+  const targets = pageIndices && pageIndices.length > 0 ? pageIndices : doc.getPageIndices();
+
+  for (const idx of targets) {
+    if (idx >= 0 && idx < totalPages) {
+      const page = doc.getPage(idx);
+      const currentRotation = page.getRotation().angle;
+      page.setRotation({ type: "degrees", angle: (currentRotation + angleDeg) % 360 } as any);
+    }
+  }
+
+  return await doc.save();
+}
+
+/**
+ * Adds page numbers to a PDF document with customizable formatting and positioning.
+ */
+export async function addPageNumbersToPdf(
+  file: File,
+  options: {
+    position: "bottom-center" | "bottom-right" | "top-center" | "top-right";
+    format: "number" | "page-x-of-y";
+    startNumber: number;
+    fontSize: number;
+    pageRange?: string;
+  }
+): Promise<Uint8Array> {
+  const { rgb, StandardFonts } = await import("pdf-lib");
+  const buffer = await file.arrayBuffer();
+  const doc = await PDFDocument.load(buffer);
+  const totalPages = doc.getPageCount();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+
+  const targetIndices = options.pageRange?.trim()
+    ? parsePageRange(options.pageRange, totalPages)
+    : doc.getPageIndices();
+
+  for (let i = 0; i < targetIndices.length; i++) {
+    const pageIdx = targetIndices[i];
+    const page = doc.getPage(pageIdx);
+    const { width, height } = page.getSize();
+    const currentNum = options.startNumber + i;
+    const text =
+      options.format === "page-x-of-y"
+        ? `Page ${currentNum} of ${totalPages}`
+        : `${currentNum}`;
+
+    const textWidth = font.widthOfTextAtSize(text, options.fontSize);
+    const textHeight = font.heightAtSize(options.fontSize);
+
+    let x = width / 2 - textWidth / 2;
+    let y = 30;
+
+    switch (options.position) {
+      case "bottom-center":
+        x = (width - textWidth) / 2;
+        y = 28;
+        break;
+      case "bottom-right":
+        x = width - textWidth - 36;
+        y = 28;
+        break;
+      case "top-center":
+        x = (width - textWidth) / 2;
+        y = height - textHeight - 28;
+        break;
+      case "top-right":
+        x = width - textWidth - 36;
+        y = height - textHeight - 28;
+        break;
+    }
+
+    page.drawText(text, {
+      x,
+      y,
+      size: options.fontSize,
+      font,
+      color: rgb(0.2, 0.22, 0.22),
+    });
+  }
+
+  return await doc.save();
+}
+
+/**
+ * Adds a customizable text watermark to a PDF document.
+ */
+export async function addWatermarkToPdf(
+  file: File,
+  options: {
+    text: string;
+    fontSize: number;
+    color: string;
+    opacity: number;
+    angleDeg: number;
+    position: "diagonal" | "center" | "header" | "footer";
+    pageRange?: string;
+  }
+): Promise<Uint8Array> {
+  const { rgb, degrees, StandardFonts } = await import("pdf-lib");
+  const buffer = await file.arrayBuffer();
+  const doc = await PDFDocument.load(buffer);
+  const totalPages = doc.getPageCount();
+  const font = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  const targetIndices = options.pageRange?.trim()
+    ? parsePageRange(options.pageRange, totalPages)
+    : doc.getPageIndices();
+
+  // Parse color hex or fallback to charcoal
+  let r = 0.3, g = 0.3, b = 0.3;
+  if (options.color.startsWith("#") && options.color.length === 7) {
+    r = parseInt(options.color.slice(1, 3), 16) / 255;
+    g = parseInt(options.color.slice(3, 5), 16) / 255;
+    b = parseInt(options.color.slice(5, 7), 16) / 255;
+  }
+
+  for (const pageIdx of targetIndices) {
+    const page = doc.getPage(pageIdx);
+    const { width, height } = page.getSize();
+    const textWidth = font.widthOfTextAtSize(options.text, options.fontSize);
+    const textHeight = font.heightAtSize(options.fontSize);
+
+    let x = (width - textWidth) / 2;
+    let y = (height - textHeight) / 2;
+    let rot = options.angleDeg;
+
+    if (options.position === "header") {
+      y = height - textHeight - 40;
+      rot = 0;
+    } else if (options.position === "footer") {
+      y = 40;
+      rot = 0;
+    } else if (options.position === "diagonal") {
+      rot = 45;
+      x = width / 2 - textWidth / 3;
+      y = height / 2 - textHeight / 3;
+    }
+
+    page.drawText(options.text, {
+      x,
+      y,
+      size: options.fontSize,
+      font,
+      color: rgb(r, g, b),
+      opacity: Math.max(0.05, Math.min(1, options.opacity)),
+      rotate: degrees(rot),
+    });
+  }
+
+  return await doc.save();
+}
+
+/**
+ * Organizes pages: reorder, delete, and rotate pages in an existing PDF.
+ */
+export async function organizePdfPages(
+  file: File,
+  pageOps: { pageIndex: number; rotation: number; isDeleted: boolean }[]
+): Promise<Uint8Array> {
+  const buffer = await file.arrayBuffer();
+  const sourceDoc = await PDFDocument.load(buffer);
+  const newDoc = await PDFDocument.create();
+
+  const activeOps = pageOps.filter((p) => !p.isDeleted);
+  if (!activeOps.length) {
+    throw new Error("Cannot create a PDF with 0 pages. Please keep at least one page.");
+  }
+
+  const indicesToCopy = activeOps.map((p) => p.pageIndex);
+  const copiedPages = await newDoc.copyPages(sourceDoc, indicesToCopy);
+
+  for (let i = 0; i < copiedPages.length; i++) {
+    const page = copiedPages[i];
+    const op = activeOps[i];
+    if (op.rotation !== 0) {
+      const current = page.getRotation().angle;
+      page.setRotation({ type: "degrees", angle: (current + op.rotation) % 360 } as any);
+    }
+    newDoc.addPage(page);
+  }
+
+  return await newDoc.save();
+}

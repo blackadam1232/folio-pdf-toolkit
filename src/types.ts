@@ -13,6 +13,26 @@ export type SortMode =
   | "date-newest"
   | "manual";
 
+export type ToolId =
+  | "images-to-pdf"
+  | "merge-pdf"
+  | "split-pdf"
+  | "rotate-pdf"
+  | "pdf-to-images"
+  | "organize-pdf"
+  | "page-numbers"
+  | "watermark";
+
+export type ToolCategory = "all" | "create" | "organize" | "export";
+
+export interface ToolMetadata {
+  id: ToolId;
+  title: string;
+  description: string;
+  category: "create" | "organize" | "export";
+  isFeatured?: boolean;
+}
+
 export interface ImageItem {
   id: string;
   file: File;
@@ -82,4 +102,62 @@ export interface ConversionResult {
   generationTimeSec: number;
   profile: ProfileOption;
   isOutdated: boolean;
+}
+
+// Tool Specific Types
+export interface PdfFileInfo {
+  id: string;
+  file: File;
+  name: string;
+  size: number;
+  pageCount: number;
+}
+
+export interface SplitOptions {
+  rangeStr: string;
+  exportZip: boolean;
+}
+
+export interface RotatePdfOptions {
+  angle: 90 | 180 | 270;
+  target: "all" | "custom";
+  customPages: number[];
+}
+
+export interface PdfToImagesOptions {
+  format: "jpeg" | "png";
+  dpi: 72 | 150 | 300;
+  pageSelection: "all" | "custom";
+  customPages: number[];
+}
+
+export type PageNumberPosition = "bottom-center" | "bottom-right" | "top-center" | "top-right";
+
+export interface PageNumberOptions {
+  position: PageNumberPosition;
+  format: "number" | "page-x-of-y";
+  startNumber: number;
+  fontSize: number;
+  pageRange: string;
+}
+
+export type WatermarkPosition = "diagonal" | "center" | "header" | "footer";
+
+export interface WatermarkOptions {
+  text: string;
+  fontSize: number;
+  color: string;
+  opacity: number;
+  angleDeg: number;
+  position: WatermarkPosition;
+  pageRange: string;
+}
+
+export interface OrganizePageItem {
+  id: string;
+  pageIndex: number; // 0-based
+  pageNumber: number; // 1-based display
+  rotation: number;
+  isDeleted: boolean;
+  thumbnailUrl?: string;
 }
