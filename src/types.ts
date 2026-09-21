@@ -21,9 +21,32 @@ export type ToolId =
   | "pdf-to-images"
   | "organize-pdf"
   | "page-numbers"
-  | "watermark";
+  | "watermark"
+  | "compress-pdf";
 
 export type ToolCategory = "all" | "create" | "organize" | "export";
+
+export type CompressionPreset = "high-quality" | "balanced" | "smallest" | "custom";
+
+export interface CompressionSettings {
+  strength: number; // 1 - 100
+  preset: CompressionPreset;
+  quality: number; // 0.28 - 0.95
+  maxDimension: number; // 1000 - 2600
+}
+
+export interface CompressionResult {
+  blob: Blob;
+  url: string;
+  originalBytes: number;
+  outputBytes: number;
+  percentSaved: number;
+  isReduced: boolean;
+  filename: string;
+  pageCount: number;
+  preset: CompressionPreset;
+  strength: number;
+}
 
 export interface ToolMetadata {
   id: ToolId;
@@ -31,6 +54,15 @@ export interface ToolMetadata {
   description: string;
   category: "create" | "organize" | "export";
   isFeatured?: boolean;
+}
+
+export interface PerPageOptions {
+  pageSize?: PageSizeOption;
+  orientation?: OrientationOption;
+  fit?: FitOption;
+  marginPreset?: MarginPresetOption;
+  marginMm?: number;
+  customMargins?: [number, number, number, number];
 }
 
 export interface ImageItem {
@@ -43,6 +75,7 @@ export interface ImageItem {
   width: number;
   height: number;
   rotation: number; // 0, 90, 180, 270
+  customOptions?: PerPageOptions;
 }
 
 export interface PdfOptions {

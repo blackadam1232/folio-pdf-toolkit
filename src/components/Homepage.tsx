@@ -11,6 +11,7 @@ import {
   NumberIcon,
   StampIcon,
   MonitorIcon,
+  CompressIcon,
 } from "./Icons";
 
 interface HomepageProps {
@@ -51,6 +52,8 @@ export function Homepage({ onSelectTool, onExploreTools }: HomepageProps) {
         return <NumberIcon className="tool-card-icon text-teal" />;
       case "watermark":
         return <StampIcon className="tool-card-icon text-orange" />;
+      case "compress-pdf":
+        return <CompressIcon className="tool-card-icon text-teal" />;
       default:
         return <FolioLogoIcon className="tool-card-icon text-teal" />;
     }

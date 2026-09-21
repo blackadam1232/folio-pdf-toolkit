@@ -102,4 +102,59 @@ describe("PDF Generation & Reader Verification", () => {
     const isAborted = controller.signal.aborted;
     expect(isAborted).toBe(true);
   });
+
+  it("applies per-page customOptions independently to single images", async () => {
+    const globalOptions: PdfOptions = {
+      pageSize: "A4",
+      orientation: "Portrait",
+      fit: "Contain",
+      profile: "Screen/Mobile",
+      marginPreset: "Small",
+      marginMm: 12,
+      customMargins: [12, 12, 12, 12],
+      filename: "test.pdf",
+      sort: "natural-asc",
+      manualOrder: [],
+    };
+
+    // Image 1: uses global options (A4 Portrait)
+    // Image 2: custom options applied ONLY to that single image (Letter Landscape)
+    // Image 3: uses global options (A4 Portrait)
+    const items = [
+      { id: "img1", width: 800, height: 600, rotation: 0 },
+      {
+        id: "img2",
+        width: 800,
+        height: 600,
+        rotation: 0,
+        customOptions: { pageSize: "Letter" as const, orientation: "Landscape" as const },
+      },
+      { id: "img3", width: 800, height: 600, rotation: 0 },
+    ];
+
+    const geometries = items.map((item) => {
+      const itemOptions: PdfOptions = {
+        ...globalOptions,
+        ...(item.customOptions || {}),
+      };
+      return calculateGeometry({
+        imageWidth: item.width,
+        imageHeight: item.height,
+        rotation: item.rotation,
+        options: itemOptions,
+      });
+    });
+
+    // Page 1: A4 Portrait (595.28 x 841.89 pt)
+    expect(geometries[0].pageWidthPt).toBeCloseTo(595.28, 1);
+    expect(geometries[0].pageHeightPt).toBeCloseTo(841.89, 1);
+
+    // Page 2: Letter Landscape (792.00 x 612.00 pt)
+    expect(geometries[1].pageWidthPt).toBeCloseTo(792.0, 1);
+    expect(geometries[1].pageHeightPt).toBeCloseTo(612.0, 1);
+
+    // Page 3: A4 Portrait (unchanged, still default A4 Portrait!)
+    expect(geometries[2].pageWidthPt).toBeCloseTo(595.28, 1);
+    expect(geometries[2].pageHeightPt).toBeCloseTo(841.89, 1);
+  });
 });

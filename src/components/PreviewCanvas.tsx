@@ -28,12 +28,17 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
     if (!ctx) return;
 
     try {
-      // Calculate geometry using the exact shared function
+      const itemOptions: PdfOptions = {
+        ...options,
+        ...(item.customOptions || {}),
+      };
+
+      // Calculate geometry using the exact shared function with item-specific options
       const geometry = calculateGeometry({
         imageWidth: item.width,
         imageHeight: item.height,
         rotation: item.rotation,
-        options,
+        options: itemOptions,
       });
 
       const { pageWidthPt, pageHeightPt, marginsPt, imageRect, cropRect } = geometry;
@@ -103,7 +108,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
           let sWidth = turnedWidth;
           let sHeight = turnedHeight;
 
-          if (options.fit === "Cover" && cropRect) {
+          if (itemOptions.fit === "Cover" && cropRect) {
             sx = cropRect.sx;
             sy = cropRect.sy;
             sWidth = cropRect.sWidth;
@@ -146,7 +151,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [item, options, item?.rotation]);
+  }, [item, options, item?.rotation, item?.customOptions]);
 
   if (!item) {
     return (
@@ -161,13 +166,17 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   // Calculate current page geometry for metadata display
   let dimensionsText = "";
   try {
+    const itemOptions: PdfOptions = {
+      ...options,
+      ...(item.customOptions || {}),
+    };
     const geo = calculateGeometry({
       imageWidth: item.width,
       imageHeight: item.height,
       rotation: item.rotation,
-      options,
+      options: itemOptions,
     });
-    dimensionsText = `${ptToMm(geo.pageWidthPt).toFixed(0)} × ${ptToMm(geo.pageHeightPt).toFixed(0)} mm (${options.pageSize})`;
+    dimensionsText = `${ptToMm(geo.pageWidthPt).toFixed(0)} × ${ptToMm(geo.pageHeightPt).toFixed(0)} mm (${itemOptions.pageSize})`;
   } catch {
     dimensionsText = "Invalid layout";
   }

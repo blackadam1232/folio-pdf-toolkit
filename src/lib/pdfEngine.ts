@@ -306,16 +306,21 @@ export async function generatePdf(
       percent: Math.round(((i + 0.2) / sortedItems.length) * 85),
     });
 
+    const itemOptions: PdfOptions = {
+      ...options,
+      ...(item.customOptions || {}),
+    };
+
     const geometry = calculateGeometry({
       imageWidth: item.width,
       imageHeight: item.height,
       rotation: item.rotation,
-      options,
+      options: itemOptions,
     });
 
     const { bytes: imageBytes, format } = await processImageForPdf(
       item,
-      options,
+      itemOptions,
       geometry
     );
 

@@ -12,6 +12,7 @@ import { PdfToImagesWorkspace } from "./components/PdfToImagesWorkspace";
 import { OrganizePdfWorkspace } from "./components/OrganizePdfWorkspace";
 import { PageNumbersWorkspace } from "./components/PageNumbersWorkspace";
 import { WatermarkWorkspace } from "./components/WatermarkWorkspace";
+import { CompressPdfWorkspace } from "./components/CompressPdfWorkspace";
 import { PrivacyModal, HelpModal } from "./components/Modals";
 import "./style.css";
 
@@ -80,6 +81,10 @@ export default function App() {
 
         {currentView === "watermark" && (
           <WatermarkWorkspace onBackToHome={() => navigateTo("home")} />
+        )}
+
+        {currentView === "compress-pdf" && (
+          <CompressPdfWorkspace onBackToHome={() => navigateTo("home")} />
         )}
       </main>
 

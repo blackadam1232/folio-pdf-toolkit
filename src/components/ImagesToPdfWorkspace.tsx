@@ -4,6 +4,7 @@ import {
   GenerationProgress,
   ImageItem,
   PdfOptions,
+  PerPageOptions,
   SortMode,
 } from "../types";
 import {
@@ -88,6 +89,123 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
       setResult((prev) => (prev ? { ...prev, isOutdated: true } : null));
     }
   };
+
+  // Active target item when configuring scope (custom per page vs all)
+  const activeTargetItem = useMemo(() => {
+    if (selectedIds.size === 1) {
+      const id = Array.from(selectedIds)[0];
+      return items.find((it) => it.id === id) || activeInspectItem;
+    }
+    return activeInspectItem;
+  }, [selectedIds, items, activeInspectItem]);
+
+  // Target item IDs for per-page updates
+  const targetIds = useMemo(() => {
+    if (selectedIds.size > 1) {
+      return Array.from(selectedIds);
+    }
+    if (selectedIds.size === 1) {
+      return Array.from(selectedIds);
+    }
+    return activeTargetItem ? [activeTargetItem.id] : [];
+  }, [selectedIds, activeTargetItem]);
+
+  // Effective options for the currently active item
+  const activeItemOptions = useMemo((): PdfOptions => {
+    if (!activeInspectItem) return options;
+    return {
+      ...options,
+      ...(activeInspectItem.customOptions || {}),
+    };
+  }, [activeInspectItem, options]);
+
+  // Options displayed in the settings controls
+  const currentDisplayOptions: PdfOptions = useMemo(() => {
+    if (scopeMode === "custom" && activeTargetItem) {
+      return {
+        ...options,
+        ...(activeTargetItem.customOptions || {}),
+      };
+    }
+    return options;
+  }, [scopeMode, activeTargetItem, options]);
+
+  // Handler for setting changes: updates custom per-page options when in "custom" mode,
+  // or updates global options when in "all" mode.
+  const handleOptionChange = <K extends keyof PerPageOptions>(
+    key: K,
+    value: PerPageOptions[K],
+    extraUpdates?: Partial<PerPageOptions>
+  ) => {
+    if (scopeMode === "custom") {
+      if (targetIds.length === 0) return;
+      setItems((prevItems) =>
+        prevItems.map((it) => {
+          if (targetIds.includes(it.id)) {
+            const currentCustom = it.customOptions || {};
+            return {
+              ...it,
+              customOptions: {
+                ...currentCustom,
+                [key]: value,
+                ...(extraUpdates || {}),
+              },
+            };
+          }
+          return it;
+        })
+      );
+      markOutdated();
+    } else {
+      setOptions((prev) => ({
+        ...prev,
+        [key]: value,
+        ...(extraUpdates || {}),
+      }));
+      markOutdated();
+    }
+  };
+
+  // Reset custom per-page options back to document defaults
+  const handleResetCustomOptions = (idsToReset: string[]) => {
+    setItems((prevItems) =>
+      prevItems.map((it) => {
+        if (idsToReset.includes(it.id)) {
+          const updated = { ...it };
+          delete updated.customOptions;
+          return updated;
+        }
+        return it;
+      })
+    );
+    markOutdated();
+  };
+
+  // Aspect ratio for preview canvas / simulated sheet
+  const previewAspectRatio = useMemo(() => {
+    if (!activeInspectItem) return "210 / 297";
+    const eff = {
+      ...options,
+      ...(activeInspectItem.customOptions || {}),
+    };
+    const isQuarter = activeInspectItem.rotation % 180 !== 0;
+    const effW = isQuarter ? activeInspectItem.height : activeInspectItem.width;
+    const effH = isQuarter ? activeInspectItem.width : activeInspectItem.height;
+
+    if (eff.pageSize === "Original") {
+      return `${effW} / ${effH}`;
+    }
+    let landscape = false;
+    if (eff.orientation === "Landscape") {
+      landscape = true;
+    } else if (eff.orientation === "Auto") {
+      landscape = effW > effH;
+    }
+    if (eff.pageSize === "Letter") {
+      return landscape ? "11 / 8.5" : "8.5 / 11";
+    }
+    return landscape ? "297 / 210" : "210 / 297";
+  }, [activeInspectItem, options]);
 
   // Add files
   const handleAddFiles = async (fileList: FileList | File[]) => {
@@ -312,12 +430,12 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
         imageWidth: activeInspectItem.width,
         imageHeight: activeInspectItem.height,
         rotation: activeInspectItem.rotation,
-        options,
+        options: activeItemOptions,
       });
     } catch (err) {
       return null;
     }
-  }, [activeInspectItem, options]);
+  }, [activeInspectItem, activeItemOptions]);
 
   return (
     <div className="folio-workspace images-workspace">
@@ -535,7 +653,9 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                         id={`page-card-${item.id}`}
                         key={item.id}
                         role="listitem"
-                        className={`page-card ${isSelected ? "selected" : ""}`}
+                        className={`page-card ${isSelected ? "selected" : ""} ${
+                          activeInspectId === item.id ? "active-inspect" : ""
+                        }`}
                         onClick={() => {
                           setActiveInspectId(item.id);
                         }}
@@ -573,6 +693,18 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                           <span className="card-filename" title={item.name}>
                             {item.name}
                           </span>
+                          {item.customOptions && Object.keys(item.customOptions).length > 0 && (
+                            <span
+                              className="card-custom-badge"
+                              title="Custom per-page settings applied"
+                            >
+                              {item.customOptions.orientation
+                                ? item.customOptions.orientation === "Landscape"
+                                  ? "Land."
+                                  : "Port."
+                                : item.customOptions.pageSize || "Custom"}
+                            </span>
+                          )}
                         </div>
                       </div>
                     );
@@ -657,17 +789,13 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                   className="paper-sheet-preview"
                   style={{
                     transform: `scale(${singleZoom})`,
-                    aspectRatio:
-                      options.orientation === "Landscape" ||
-                      (options.orientation === "Auto" && activeInspectItem.width > activeInspectItem.height)
-                        ? "297 / 210"
-                        : "210 / 297",
+                    aspectRatio: previewAspectRatio,
                   }}
                 >
                   <div
                     className="paper-printable-area"
                     style={{
-                      padding: `${options.marginMm * 1.5}px`,
+                      padding: `${(activeItemOptions.marginMm ?? 12) * 1.5}px`,
                     }}
                   >
                     <img
@@ -676,7 +804,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                       style={{
                         width: "100%",
                         height: "100%",
-                        objectFit: options.fit === "Cover" ? "cover" : "contain",
+                        objectFit: activeItemOptions.fit === "Cover" ? "cover" : "contain",
                         transform: `rotate(${activeInspectItem.rotation}deg)`,
                       }}
                     />
@@ -733,27 +861,54 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
             </button>
           </div>
 
+          {scopeMode === "custom" && (
+            <div className="custom-scope-box">
+              <div className="custom-scope-header">
+                <span className="custom-scope-label">
+                  {targetIds.length > 1
+                    ? `Editing ${targetIds.length} selected pages`
+                    : activeTargetItem
+                    ? `Editing Page ${
+                        Math.max(
+                          0,
+                          sortedItems.findIndex((it) => it.id === activeTargetItem.id)
+                        ) + 1
+                      }: ${activeTargetItem.name}`
+                    : "Click a page to customize"}
+                </span>
+                {activeTargetItem?.customOptions &&
+                  Object.keys(activeTargetItem.customOptions).length > 0 && (
+                    <button
+                      type="button"
+                      className="btn-reset-custom"
+                      onClick={() => handleResetCustomOptions(targetIds)}
+                      title="Reset this page to document defaults"
+                    >
+                      Reset to default
+                    </button>
+                  )}
+              </div>
+              <p className="custom-scope-hint">
+                Settings below apply only to this single page.
+              </p>
+            </div>
+          )}
+
           {/* Setting 1: Page Orientation */}
           <div className="setting-group">
             <label className="setting-label">Page orientation</label>
             <div className="segmented-control">
               <button
                 type="button"
-                className={`segment-btn ${options.orientation === "Portrait" ? "active" : ""}`}
-                onClick={() => {
-                  setOptions((prev) => ({ ...prev, orientation: "Portrait" }));
-                  markOutdated();
-                }}
+                className={`segment-btn ${currentDisplayOptions.orientation === "Portrait" ? "active" : ""}`}
+                onClick={() => handleOptionChange("orientation", "Portrait")}
               >
                 Portrait
               </button>
               <button
                 type="button"
-                className={`segment-btn ${options.orientation === "Landscape" ? "active" : ""}`}
-                onClick={() => {
-                  setOptions((prev) => ({ ...prev, orientation: "Landscape" }));
-                  markOutdated();
-                }}
+                className={`segment-btn ${currentDisplayOptions.orientation === "Landscape" ? "active" : ""}`}
+                onClick={() => handleOptionChange("orientation", "Landscape")}
               >
                 Landscape
               </button>
@@ -765,11 +920,8 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
             <label className="setting-label">Page size</label>
             <select
               className="setting-select"
-              value={options.pageSize}
-              onChange={(e) => {
-                setOptions((prev) => ({ ...prev, pageSize: e.target.value as any }));
-                markOutdated();
-              }}
+              value={currentDisplayOptions.pageSize}
+              onChange={(e) => handleOptionChange("pageSize", e.target.value as any)}
             >
               <option value="A4">A4 (210 × 297 mm)</option>
               <option value="Letter">Letter (8.5 × 11 in)</option>
@@ -783,37 +935,28 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
             <div className="segmented-control">
               <button
                 type="button"
-                className={`segment-btn ${options.marginPreset === "None" ? "active" : ""}`}
-                onClick={() => {
-                  setOptions((prev) => ({ ...prev, marginPreset: "None", marginMm: 0 }));
-                  markOutdated();
-                }}
+                className={`segment-btn ${currentDisplayOptions.marginPreset === "None" ? "active" : ""}`}
+                onClick={() => handleOptionChange("marginPreset", "None", { marginMm: 0 })}
               >
                 None
               </button>
               <button
                 type="button"
-                className={`segment-btn ${options.marginPreset === "Small" ? "active" : ""}`}
-                onClick={() => {
-                  setOptions((prev) => ({ ...prev, marginPreset: "Small", marginMm: 12 }));
-                  markOutdated();
-                }}
+                className={`segment-btn ${currentDisplayOptions.marginPreset === "Small" ? "active" : ""}`}
+                onClick={() => handleOptionChange("marginPreset", "Small", { marginMm: 12 })}
               >
                 Small
               </button>
               <button
                 type="button"
-                className={`segment-btn ${options.marginPreset === "Custom" ? "active" : ""}`}
-                onClick={() => {
-                  setOptions((prev) => ({ ...prev, marginPreset: "Custom" }));
-                  markOutdated();
-                }}
+                className={`segment-btn ${currentDisplayOptions.marginPreset === "Custom" ? "active" : ""}`}
+                onClick={() => handleOptionChange("marginPreset", "Custom")}
               >
                 Custom
               </button>
             </div>
 
-            {options.marginPreset !== "None" && (
+            {currentDisplayOptions.marginPreset !== "None" && (
               <div className="margin-size-row">
                 <span className="margin-size-label">Margin size</span>
                 <div className="margin-input-wrap">
@@ -821,11 +964,10 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                     type="number"
                     min="0"
                     max="60"
-                    value={options.marginMm}
+                    value={currentDisplayOptions.marginMm}
                     onChange={(e) => {
                       const val = Math.max(0, parseInt(e.target.value, 10) || 0);
-                      setOptions((prev) => ({ ...prev, marginMm: val }));
-                      markOutdated();
+                      handleOptionChange("marginMm", val);
                     }}
                     className="margin-input"
                   />
@@ -840,11 +982,8 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
             <label className="setting-label">Fit image to page</label>
             <select
               className="setting-select"
-              value={options.fit}
-              onChange={(e) => {
-                setOptions((prev) => ({ ...prev, fit: e.target.value as any }));
-                markOutdated();
-              }}
+              value={currentDisplayOptions.fit}
+              onChange={(e) => handleOptionChange("fit", e.target.value as any)}
             >
               <option value="Contain">Contain</option>
               <option value="Cover">Cover</option>

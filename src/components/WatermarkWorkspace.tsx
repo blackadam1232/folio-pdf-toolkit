@@ -1,5 +1,6 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { inspectPdfFile, addWatermarkToPdf, parsePageRange } from "../lib/pdfEngine";
+import { renderPdfPage, RenderedPageResult } from "../lib/pdfRenderer";
 import { StampIcon, PdfDocIcon } from "./Icons";
 import { WatermarkPosition } from "../types";
 
@@ -18,12 +19,59 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
   const [pageRange, setPageRange] = useState<string>("");
   const [targetScope, setTargetScope] = useState<"all" | "custom">("all");
 
+  const [previewPage, setPreviewPage] = useState<number>(1);
+  const [renderedPage, setRenderedPage] = useState<RenderedPageResult | null>(null);
+  const [isRenderingPage, setIsRenderingPage] = useState<boolean>(false);
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [downloadName, setDownloadName] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Render actual PDF page content whenever file or preview page changes
+  useEffect(() => {
+    if (!file) {
+      setRenderedPage(null);
+      return;
+    }
+    let isCancelled = false;
+    setIsRenderingPage(true);
+    renderPdfPage(file, previewPage)
+      .then((res) => {
+        if (!isCancelled) {
+          setRenderedPage(res);
+          setIsRenderingPage(false);
+        }
+      })
+      .catch((err) => {
+        if (!isCancelled) {
+          console.error("Failed to render PDF page:", err);
+          setIsRenderingPage(false);
+        }
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, [file, previewPage]);
+
+  // Compute targeted pages in custom range mode
+  const targetIndices = useMemo(() => {
+    if (targetScope !== "custom" || !pageRange.trim() || pageCount === 0) {
+      return null; // null means all pages
+    }
+    try {
+      return parsePageRange(pageRange, pageCount);
+    } catch {
+      return [];
+    }
+  }, [targetScope, pageRange, pageCount]);
+
+  const isCurrentPageIncluded = useMemo(() => {
+    if (targetIndices === null) return true;
+    return targetIndices.includes(previewPage - 1);
+  }, [targetIndices, previewPage]);
 
   const handleSelectFile = async (selectedFile: File) => {
     if (!selectedFile.name.toLowerCase().endsWith(".pdf")) {
@@ -35,6 +83,8 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
       const info = await inspectPdfFile(selectedFile);
       setFile(selectedFile);
       setPageCount(info.pageCount);
+      setPreviewPage(1);
+      setRenderedPage(null);
       setPageRange(`1-${info.pageCount}`);
       setDownloadUrl(null);
     } catch (err) {
@@ -145,27 +195,85 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
             </div>
 
             <div className="watermark-preview-box">
-              <div className="preview-sheet-representation">
-                <div className="dummy-sheet-lines">
-                  <div className="dummy-line" />
-                  <div className="dummy-line" />
-                  <div className="dummy-line" />
-                  <div className="dummy-line short" />
-                </div>
-                {/* Simulated Watermark Text */}
-                <div
-                  className={`simulated-watermark-text pos-${position}`}
-                  style={{
-                    color,
-                    opacity,
-                    fontSize: `${fontSize * 0.4}px`,
-                    transform: position === "diagonal" ? "translate(-50%, -50%) rotate(-45deg)" : "none",
-                  }}
+              {/* Page navigation controls */}
+              <div className="preview-nav-bar">
+                <button
+                  type="button"
+                  className="btn-preview-nav"
+                  disabled={previewPage <= 1}
+                  onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
+                  title="Previous page"
                 >
-                  {text || "WATERMARK"}
-                </div>
+                  ← Prev
+                </button>
+                <span className="preview-page-indicator">
+                  Page {previewPage} of {pageCount}
+                </span>
+                <button
+                  type="button"
+                  className="btn-preview-nav"
+                  disabled={previewPage >= pageCount}
+                  onClick={() => setPreviewPage((p) => Math.min(pageCount, p + 1))}
+                  title="Next page"
+                >
+                  Next →
+                </button>
               </div>
-              <p className="preview-caption">Live watermark simulation</p>
+
+              {/* Real PDF Page Render with Watermark */}
+              <div
+                className="preview-real-sheet"
+                style={{
+                  aspectRatio: renderedPage
+                    ? `${renderedPage.width} / ${renderedPage.height}`
+                    : "210 / 297",
+                }}
+              >
+                {renderedPage ? (
+                  <img
+                    src={renderedPage.dataUrl}
+                    alt={`PDF Page ${previewPage}`}
+                    className="preview-real-img"
+                  />
+                ) : (
+                  <div className="preview-sheet-loading">
+                    <div className="loading-spinner" />
+                    <span>Rendering page {previewPage}…</span>
+                  </div>
+                )}
+
+                {isRenderingPage && (
+                  <div className="preview-updating-tag">Rendering…</div>
+                )}
+
+                {/* Simulated Watermark Text */}
+                {isCurrentPageIncluded ? (
+                  <div
+                    className={`simulated-watermark-text pos-${position}`}
+                    style={{
+                      color,
+                      opacity,
+                      fontSize: `${fontSize * 0.4}px`,
+                      transform:
+                        position === "diagonal"
+                          ? "translate(-50%, -50%) rotate(-45deg)"
+                          : "none",
+                    }}
+                  >
+                    {text || "WATERMARK"}
+                  </div>
+                ) : (
+                  <div className="preview-excluded-pill">
+                    Watermark omitted on page {previewPage}
+                  </div>
+                )}
+              </div>
+
+              <p className="preview-caption">
+                {isCurrentPageIncluded
+                  ? `Live preview: Page ${previewPage} with watermark`
+                  : `Page ${previewPage} is excluded by custom range (${pageRange || "none"})`}
+              </p>
             </div>
           </div>
 

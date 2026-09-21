@@ -1,5 +1,6 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { inspectPdfFile, addPageNumbersToPdf, parsePageRange } from "../lib/pdfEngine";
+import { renderPdfPage, RenderedPageResult } from "../lib/pdfRenderer";
 import { NumberIcon, PdfDocIcon } from "./Icons";
 import { PageNumberPosition } from "../types";
 
@@ -17,12 +18,70 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
   const [pageRange, setPageRange] = useState<string>("");
   const [targetScope, setTargetScope] = useState<"all" | "custom">("all");
 
+  const [previewPage, setPreviewPage] = useState<number>(1);
+  const [renderedPage, setRenderedPage] = useState<RenderedPageResult | null>(null);
+  const [isRenderingPage, setIsRenderingPage] = useState<boolean>(false);
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [downloadName, setDownloadName] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Render actual PDF page content whenever file or preview page changes
+  useEffect(() => {
+    if (!file) {
+      setRenderedPage(null);
+      return;
+    }
+    let isCancelled = false;
+    setIsRenderingPage(true);
+    renderPdfPage(file, previewPage)
+      .then((res) => {
+        if (!isCancelled) {
+          setRenderedPage(res);
+          setIsRenderingPage(false);
+        }
+      })
+      .catch((err) => {
+        if (!isCancelled) {
+          console.error("Failed to render PDF page:", err);
+          setIsRenderingPage(false);
+        }
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, [file, previewPage]);
+
+  // Compute targeted pages in custom range mode
+  const customTargetIndices = useMemo(() => {
+    if (targetScope !== "custom" || !pageRange.trim() || pageCount === 0) {
+      return null; // null represents all pages
+    }
+    try {
+      return parsePageRange(pageRange, pageCount);
+    } catch {
+      return [];
+    }
+  }, [targetScope, pageRange, pageCount]);
+
+  // Whether currently inspected page is included in the numbering
+  const isCurrentPageIncluded = useMemo(() => {
+    if (customTargetIndices === null) return true;
+    return customTargetIndices.includes(previewPage - 1);
+  }, [customTargetIndices, previewPage]);
+
+  // Calculated sequential number for the currently previewed page
+  const computedPageNumber = useMemo(() => {
+    if (!isCurrentPageIncluded) return null;
+    if (customTargetIndices === null) {
+      return startNumber + (previewPage - 1);
+    }
+    const idxInTargets = customTargetIndices.indexOf(previewPage - 1);
+    return startNumber + idxInTargets;
+  }, [isCurrentPageIncluded, customTargetIndices, previewPage, startNumber]);
 
   const handleSelectFile = async (selectedFile: File) => {
     if (!selectedFile.name.toLowerCase().endsWith(".pdf")) {
@@ -34,6 +93,8 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
       const info = await inspectPdfFile(selectedFile);
       setFile(selectedFile);
       setPageCount(info.pageCount);
+      setPreviewPage(1);
+      setRenderedPage(null);
       setPageRange(`1-${info.pageCount}`);
       setDownloadUrl(null);
     } catch (err) {
@@ -137,18 +198,80 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
             </div>
 
             <div className="numbering-preview-box">
-              <div className="preview-sheet-representation">
-                <div className="dummy-sheet-lines">
-                  <div className="dummy-line" />
-                  <div className="dummy-line" />
-                  <div className="dummy-line short" />
-                </div>
-                {/* Simulated Number Badge */}
-                <div className={`preview-number-indicator pos-${position}`}>
-                  {format === "page-x-of-y" ? `Page ${startNumber} of ${pageCount}` : `${startNumber}`}
-                </div>
+              {/* Page navigation controls */}
+              <div className="preview-nav-bar">
+                <button
+                  type="button"
+                  className="btn-preview-nav"
+                  disabled={previewPage <= 1}
+                  onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
+                  title="Previous page"
+                >
+                  ← Prev
+                </button>
+                <span className="preview-page-indicator">
+                  Page {previewPage} of {pageCount}
+                </span>
+                <button
+                  type="button"
+                  className="btn-preview-nav"
+                  disabled={previewPage >= pageCount}
+                  onClick={() => setPreviewPage((p) => Math.min(pageCount, p + 1))}
+                  title="Next page"
+                >
+                  Next →
+                </button>
               </div>
-              <p className="preview-caption">Position preview on page</p>
+
+              {/* Real PDF Page Render */}
+              <div
+                className="preview-real-sheet"
+                style={{
+                  aspectRatio: renderedPage
+                    ? `${renderedPage.width} / ${renderedPage.height}`
+                    : "210 / 297",
+                }}
+              >
+                {renderedPage ? (
+                  <img
+                    src={renderedPage.dataUrl}
+                    alt={`PDF Page ${previewPage}`}
+                    className="preview-real-img"
+                  />
+                ) : (
+                  <div className="preview-sheet-loading">
+                    <div className="loading-spinner" />
+                    <span>Rendering page {previewPage}…</span>
+                  </div>
+                )}
+
+                {isRenderingPage && (
+                  <div className="preview-updating-tag">Rendering…</div>
+                )}
+
+                {/* Number Overlay or Excluded Badge */}
+                {isCurrentPageIncluded && computedPageNumber !== null ? (
+                  <div className={`preview-number-indicator pos-${position}`}>
+                    {format === "page-x-of-y"
+                      ? `Page ${computedPageNumber} of ${pageCount}`
+                      : `${computedPageNumber}`}
+                  </div>
+                ) : (
+                  <div className="preview-excluded-pill">
+                    Page {previewPage} excluded from numbering
+                  </div>
+                )}
+              </div>
+
+              <p className="preview-caption">
+                {isCurrentPageIncluded
+                  ? `Live preview: Page ${previewPage} will be numbered as ${
+                      format === "page-x-of-y"
+                        ? `Page ${computedPageNumber} of ${pageCount}`
+                        : computedPageNumber
+                    }`
+                  : `Page ${previewPage} is excluded by custom range (${pageRange || "none"})`}
+              </p>
             </div>
           </div>
 

@@ -1,5 +1,6 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { inspectPdfFile, rotatePdf, parsePageRange } from "../lib/pdfEngine";
+import { renderPdfPage, RenderedPageResult } from "../lib/pdfRenderer";
 import { RotateIcon, PdfDocIcon } from "./Icons";
 
 interface RotatePdfWorkspaceProps {
@@ -12,12 +13,60 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
   const [angle, setAngle] = useState<90 | 180 | 270>(90);
   const [targetScope, setTargetScope] = useState<"all" | "custom">("all");
   const [customRange, setCustomRange] = useState<string>("1");
+
+  const [previewPage, setPreviewPage] = useState<number>(1);
+  const [renderedPage, setRenderedPage] = useState<RenderedPageResult | null>(null);
+  const [isRenderingPage, setIsRenderingPage] = useState<boolean>(false);
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [downloadName, setDownloadName] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Render actual PDF page content whenever file or preview page changes
+  useEffect(() => {
+    if (!file) {
+      setRenderedPage(null);
+      return;
+    }
+    let isCancelled = false;
+    setIsRenderingPage(true);
+    renderPdfPage(file, previewPage)
+      .then((res) => {
+        if (!isCancelled) {
+          setRenderedPage(res);
+          setIsRenderingPage(false);
+        }
+      })
+      .catch((err) => {
+        if (!isCancelled) {
+          console.error("Failed to render PDF page:", err);
+          setIsRenderingPage(false);
+        }
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, [file, previewPage]);
+
+  // Compute targeted pages in custom range mode
+  const targetIndices = useMemo(() => {
+    if (targetScope !== "custom" || !customRange.trim() || pageCount === 0) {
+      return null; // null means all pages
+    }
+    try {
+      return parsePageRange(customRange, pageCount);
+    } catch {
+      return [];
+    }
+  }, [targetScope, customRange, pageCount]);
+
+  const isCurrentPageIncluded = useMemo(() => {
+    if (targetIndices === null) return true;
+    return targetIndices.includes(previewPage - 1);
+  }, [targetIndices, previewPage]);
 
   const handleSelectFile = async (selectedFile: File) => {
     if (!selectedFile.name.toLowerCase().endsWith(".pdf")) {
@@ -29,6 +78,8 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
       const info = await inspectPdfFile(selectedFile);
       setFile(selectedFile);
       setPageCount(info.pageCount);
+      setPreviewPage(1);
+      setRenderedPage(null);
       setCustomRange(`1-${info.pageCount}`);
       setDownloadUrl(null);
     } catch (err) {
@@ -126,16 +177,70 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
             </div>
 
             <div className="rotate-preview-visual">
-              <div
-                className="rotate-sample-box"
-                style={{ transform: `rotate(${angle}deg)` }}
-              >
-                <div className="rotate-box-header" />
-                <div className="rotate-box-line line-1" />
-                <div className="rotate-box-line line-2" />
-                <span className="rotate-angle-tag">{angle}°</span>
+              {/* Page navigation controls */}
+              <div className="preview-nav-bar">
+                <button
+                  type="button"
+                  className="btn-preview-nav"
+                  disabled={previewPage <= 1}
+                  onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
+                  title="Previous page"
+                >
+                  ← Prev
+                </button>
+                <span className="preview-page-indicator">
+                  Page {previewPage} of {pageCount}
+                </span>
+                <button
+                  type="button"
+                  className="btn-preview-nav"
+                  disabled={previewPage >= pageCount}
+                  onClick={() => setPreviewPage((p) => Math.min(pageCount, p + 1))}
+                  title="Next page"
+                >
+                  Next →
+                </button>
               </div>
-              <p className="rotate-caption">Rotation preview ({angle}° clockwise)</p>
+
+              {/* Real PDF Page Render with Rotation */}
+              <div className="rotate-stage-container">
+                <div
+                  className="rotate-real-sheet-wrap"
+                  style={{
+                    transform: isCurrentPageIncluded ? `rotate(${angle}deg)` : "none",
+                  }}
+                >
+                  {renderedPage ? (
+                    <img
+                      src={renderedPage.dataUrl}
+                      alt={`Page ${previewPage}`}
+                      className="rotate-real-img"
+                      style={{
+                        aspectRatio: `${renderedPage.width} / ${renderedPage.height}`,
+                      }}
+                    />
+                  ) : (
+                    <div className="preview-sheet-loading">
+                      <div className="loading-spinner" />
+                      <span>Rendering page {previewPage}…</span>
+                    </div>
+                  )}
+
+                  {isRenderingPage && (
+                    <div className="preview-updating-tag">Rendering…</div>
+                  )}
+                </div>
+
+                <div className="rotate-angle-tag">
+                  {isCurrentPageIncluded ? `${angle}°` : "0° (skipped)"}
+                </div>
+              </div>
+
+              <p className="rotate-caption">
+                {isCurrentPageIncluded
+                  ? `Live preview: Page ${previewPage} rotated ${angle}° clockwise`
+                  : `Page ${previewPage} remains unchanged (excluded by specific pages)`}
+              </p>
             </div>
           </div>
 

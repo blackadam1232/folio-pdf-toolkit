@@ -50,6 +50,12 @@ export const TOOL_REGISTRY: ToolMetadata[] = [
     description: "Add a text watermark to selected pages.",
     category: "create",
   },
+  {
+    id: "compress-pdf",
+    title: "Compress PDF",
+    description: "Reduce file size while preserving quality.",
+    category: "export",
+  },
 ];
 
 export function getToolById(id: string): ToolMetadata | undefined {
