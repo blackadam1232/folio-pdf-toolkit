@@ -889,6 +889,7 @@ input, select, textarea {
   display: flex;
   gap: 24px;
   width: 100%;
+  align-items: flex-start;
 }
 
 .workspace-main-col {
@@ -1083,25 +1084,26 @@ input, select, textarea {
 
 .page-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 14px;
+  width: 100%;
 }
 
 @media (max-width: 1200px) {
   .page-grid {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 900px) {
   .page-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 600px) {
   .page-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1117,6 +1119,10 @@ input, select, textarea {
   position: relative;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
   user-select: none;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .page-card:hover {
@@ -1168,12 +1174,17 @@ input, select, textarea {
   align-items: center;
   justify-content: center;
   margin-bottom: 8px;
+  min-width: 0;
+  position: relative;
 }
 
 .card-thumb-img {
   width: 100%;
   height: 100%;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: cover;
+  display: block;
   transition: transform 0.2s ease;
 }
 
@@ -1182,6 +1193,9 @@ input, select, textarea {
   align-items: baseline;
   gap: 6px;
   font-size: 12px;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
 }
 
 .card-page-num {
@@ -1195,6 +1209,8 @@ input, select, textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
 
 /* Grid Footer Bar */
@@ -1385,10 +1401,14 @@ input, select, textarea {
    =================================================================== */
 .workspace-sidebar {
   width: 300px;
+  min-width: 280px;
+  max-width: 320px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  position: sticky;
+  top: 84px;
 }
 
 .sidebar-heading {

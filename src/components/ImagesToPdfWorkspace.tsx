@@ -64,35 +64,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Auto-load 20 sample travel photos on initial mount if empty so user immediately sees the reference screen!
-  useEffect(() => {
-    let mounted = true;
-    const initSamples = async () => {
-      try {
-        setIsLoadingSamples(true);
-        const sampleItems = await loadSampleSet(20);
-        if (mounted) {
-          setItems(sampleItems);
-          setActiveInspectId(sampleItems[0]?.id || "");
-          // Select items 1, 2, 4 (coast.jpg, street.jpg, leaves.jpg) to match the reference screenshot!
-          const preselected = new Set<string>();
-          if (sampleItems[0]) preselected.add(sampleItems[0].id);
-          if (sampleItems[1]) preselected.add(sampleItems[1].id);
-          if (sampleItems[3]) preselected.add(sampleItems[3].id);
-          setSelectedIds(preselected);
-        }
-      } catch (e) {
-        console.error("Failed to load sample set:", e);
-      } finally {
-        if (mounted) setIsLoadingSamples(false);
-      }
-    };
-    initSamples();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  // Clean empty initial state - no default images auto-loaded
 
   // Sorted items based on active sort options
   const sortedItems = useMemo(() => {
