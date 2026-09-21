@@ -121,7 +121,7 @@ input, select, textarea {
 }
 
 .header-container {
-  max-width: 1280px;
+  max-width: 1200px;
   margin: 0 auto;
   height: 64px;
   padding: 0 24px;
@@ -269,7 +269,7 @@ input, select, textarea {
 /* Hero Section */
 .hero-section {
   padding: 60px 24px 70px;
-  max-width: 1280px;
+  max-width: 1200px;
   margin: 0 auto;
   width: 100%;
 }
@@ -516,7 +516,7 @@ input, select, textarea {
 /* Tools Section */
 .tools-section {
   padding: 50px 24px 60px;
-  max-width: 1280px;
+  max-width: 1200px;
   margin: 0 auto;
   width: 100%;
 }
@@ -771,7 +771,7 @@ input, select, textarea {
 /* Process Section: From files to finished */
 .process-section {
   padding: 50px 24px 70px;
-  max-width: 1280px;
+  max-width: 1200px;
   margin: 0 auto;
   width: 100%;
 }
@@ -843,7 +843,7 @@ input, select, textarea {
 }
 
 .footer-container {
-  max-width: 1280px;
+  max-width: 1200px;
   margin: 0 auto;
   display: flex;
   align-items: center;
@@ -879,7 +879,7 @@ input, select, textarea {
   flex: 1;
   display: flex;
   flex-direction: column;
-  max-width: 1360px;
+  max-width: 1200px;
   margin: 0 auto;
   width: 100%;
   padding: 24px;
@@ -1255,6 +1255,9 @@ input, select, textarea {
   align-items: center;
   gap: 12px;
   transition: border-color 0.15s ease;
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .empty-dropzone:hover {
@@ -2642,6 +2645,62 @@ input, select, textarea {
     width: 280px;
     height: 240px;
     transform: scale(0.72);
+  }
+}
+
+/* ===================================================================
+   LARGE SCREEN (≥1440px) — Tighter editorial layout
+   =================================================================== */
+@media (min-width: 1440px) {
+  .header-container {
+    max-width: 1200px;
+  }
+
+  .hero-headline {
+    font-size: 64px;
+  }
+
+  /* 3-column tool grid on large screens */
+  .tools-cards-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  /* Featured card stays left with the 3-col grid beside it */
+  .tools-showcase {
+    grid-template-columns: 1fr 2fr;
+    gap: 24px;
+  }
+
+  .tool-featured-card {
+    min-height: 340px;
+    flex-direction: column;
+    justify-content: flex-start;
+    padding: 36px 32px;
+    gap: 20px;
+  }
+
+  .featured-card-body {
+    max-width: none;
+  }
+
+  .featured-card-title {
+    font-size: 28px;
+  }
+
+  .featured-card-graphic {
+    width: auto;
+    height: auto;
+  }
+
+  /* Workspace on large screens: better sidebar proportions */
+  .workspace-sidebar {
+    width: 320px;
+    min-width: 300px;
+  }
+
+  /* Compress layout slightly wider sidebar on large screens */
+  .compress-responsive-layout {
+    grid-template-columns: 1fr 360px;
   }
 }
 
