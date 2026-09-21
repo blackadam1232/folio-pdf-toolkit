@@ -459,6 +459,14 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
           {/* Main Title Area */}
           <div className="workspace-title-bar">
             <div className="title-left-group">
+              <button
+                type="button"
+                className="btn-inapp-back"
+                onClick={onBackToHome}
+                aria-label="Back to all tools"
+              >
+                ← All tools
+              </button>
               <h1 className="document-title">Your document</h1>
               <span className="document-page-badge">
                 {sortedItems.length} {sortedItems.length === 1 ? "page" : "pages"}

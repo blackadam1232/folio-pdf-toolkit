@@ -125,11 +125,21 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
       />
 
       <div className="tool-workspace-header">
-        <div>
-          <h1 className="document-title">Rotate pages</h1>
-          <p className="tool-header-subtitle">
-            Turn pages clockwise or upside-down to ensure consistent reading orientation.
-          </p>
+        <div className="header-nav-inline">
+          <button
+            type="button"
+            className="btn-inapp-back"
+            onClick={onBackToHome}
+            aria-label="Back to all tools"
+          >
+            ← All tools
+          </button>
+          <div>
+            <h1 className="document-title">Rotate pages</h1>
+            <p className="tool-header-subtitle">
+              Turn pages clockwise or upside-down to ensure consistent reading orientation.
+            </p>
+          </div>
         </div>
         {file && (
           <button

@@ -120,11 +120,21 @@ export function MergePdfWorkspace({ onBackToHome }: MergePdfWorkspaceProps) {
       />
 
       <div className="tool-workspace-header">
-        <div>
-          <h1 className="document-title">Merge PDFs</h1>
-          <p className="tool-header-subtitle">
-            Combine multiple documents into one in your chosen order.
-          </p>
+        <div className="header-nav-inline">
+          <button
+            type="button"
+            className="btn-inapp-back"
+            onClick={onBackToHome}
+            aria-label="Back to all tools"
+          >
+            ← All tools
+          </button>
+          <div>
+            <h1 className="document-title">Merge PDFs</h1>
+            <p className="tool-header-subtitle">
+              Combine multiple documents into one in your chosen order.
+            </p>
+          </div>
         </div>
         <button
           type="button"

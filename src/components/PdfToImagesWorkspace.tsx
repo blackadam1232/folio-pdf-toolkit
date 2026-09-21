@@ -154,11 +154,21 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
       />
 
       <div className="tool-workspace-header">
-        <div>
-          <h1 className="document-title">PDF to images</h1>
-          <p className="tool-header-subtitle">
-            Extract document pages into sharp JPG or PNG images.
-          </p>
+        <div className="header-nav-inline">
+          <button
+            type="button"
+            className="btn-inapp-back"
+            onClick={onBackToHome}
+            aria-label="Back to all tools"
+          >
+            ← All tools
+          </button>
+          <div>
+            <h1 className="document-title">PDF to images</h1>
+            <p className="tool-header-subtitle">
+              Extract document pages into sharp JPG or PNG images.
+            </p>
+          </div>
         </div>
         {file && (
           <button

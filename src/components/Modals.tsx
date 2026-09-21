@@ -1,37 +1,67 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { LockIcon } from "./Icons";
 
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
+  triggerRef?: React.RefObject<HTMLElement | null>;
 }
 
-export function PrivacyModal({ isOpen, onClose }: ModalProps) {
+export function PrivacyModal({ isOpen, onClose, triggerRef }: ModalProps) {
+  const modalRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
+    if (!isOpen) return;
+
+    const previousActiveElement = document.activeElement as HTMLElement | null;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
     };
-    if (isOpen) {
-      window.addEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "hidden";
-    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    // Focus close button on open
+    const closeBtn = modalRef.current?.querySelector<HTMLButtonElement>(".modal-close-btn");
+    closeBtn?.focus();
+
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "";
+      document.body.style.overflow = originalOverflow;
+      if (triggerRef?.current) {
+        triggerRef.current.focus();
+      } else if (previousActiveElement && typeof previousActiveElement.focus === "function") {
+        previousActiveElement.focus();
+      }
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, triggerRef]);
 
   if (!isOpen) return null;
 
   return (
-    <div className="folio-modal-backdrop" onClick={onClose} role="dialog" aria-modal="true">
-      <div className="folio-modal-card" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="folio-modal-backdrop"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="privacy-modal-heading"
+    >
+      <div
+        className="folio-modal-card"
+        ref={modalRef}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
           <div className="modal-title-group">
             <span className="modal-lock-badge">
               <LockIcon className="modal-lock-icon" />
             </span>
-            <h2 className="modal-heading">Privacy Guarantee</h2>
+            <h2 id="privacy-modal-heading" className="modal-heading">Privacy Guarantee</h2>
           </div>
           <button
             type="button"
@@ -88,28 +118,57 @@ export function PrivacyModal({ isOpen, onClose }: ModalProps) {
   );
 }
 
-export function HelpModal({ isOpen, onClose }: ModalProps) {
+export function HelpModal({ isOpen, onClose, triggerRef }: ModalProps) {
+  const modalRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
+    if (!isOpen) return;
+
+    const previousActiveElement = document.activeElement as HTMLElement | null;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
     };
-    if (isOpen) {
-      window.addEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "hidden";
-    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    // Focus close button on open
+    const closeBtn = modalRef.current?.querySelector<HTMLButtonElement>(".modal-close-btn");
+    closeBtn?.focus();
+
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "";
+      document.body.style.overflow = originalOverflow;
+      if (triggerRef?.current) {
+        triggerRef.current.focus();
+      } else if (previousActiveElement && typeof previousActiveElement.focus === "function") {
+        previousActiveElement.focus();
+      }
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, triggerRef]);
 
   if (!isOpen) return null;
 
   return (
-    <div className="folio-modal-backdrop" onClick={onClose} role="dialog" aria-modal="true">
-      <div className="folio-modal-card" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="folio-modal-backdrop"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="help-modal-heading"
+    >
+      <div
+        className="folio-modal-card"
+        ref={modalRef}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
-          <h2 className="modal-heading">Help & Specifications</h2>
+          <h2 id="help-modal-heading" className="modal-heading">Help & Specifications</h2>
           <button
             type="button"
             className="modal-close-btn"

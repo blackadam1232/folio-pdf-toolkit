@@ -146,11 +146,21 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
       />
 
       <div className="tool-workspace-header">
-        <div>
-          <h1 className="document-title">Page numbers</h1>
-          <p className="tool-header-subtitle">
-            Add clean, consistent numbering to your document pages.
-          </p>
+        <div className="header-nav-inline">
+          <button
+            type="button"
+            className="btn-inapp-back"
+            onClick={onBackToHome}
+            aria-label="Back to all tools"
+          >
+            ← All tools
+          </button>
+          <div>
+            <h1 className="document-title">Page numbers</h1>
+            <p className="tool-header-subtitle">
+              Add clean, consistent numbering to your document pages.
+            </p>
+          </div>
         </div>
         {file && (
           <button

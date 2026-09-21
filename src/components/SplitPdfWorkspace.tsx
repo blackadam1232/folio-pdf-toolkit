@@ -88,11 +88,21 @@ export function SplitPdfWorkspace({ onBackToHome }: SplitPdfWorkspaceProps) {
       />
 
       <div className="tool-workspace-header">
-        <div>
-          <h1 className="document-title">Split PDF</h1>
-          <p className="tool-header-subtitle">
-            Extract individual pages or ranges into separate PDF documents.
-          </p>
+        <div className="header-nav-inline">
+          <button
+            type="button"
+            className="btn-inapp-back"
+            onClick={onBackToHome}
+            aria-label="Back to all tools"
+          >
+            ← All tools
+          </button>
+          <div>
+            <h1 className="document-title">Split PDF</h1>
+            <p className="tool-header-subtitle">
+              Extract individual pages or ranges into separate PDF documents.
+            </p>
+          </div>
         </div>
         {file && (
           <button

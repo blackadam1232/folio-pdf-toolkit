@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React from "react";
 import { FolioLogoIcon, LockIcon } from "./Icons";
 import { ToolId } from "../types";
+import { router, useRouter } from "../lib/router";
 
 interface HeaderProps {
   currentView: "home" | ToolId;
@@ -17,7 +18,23 @@ export function Header({
   onOpenHelp,
   toolTitle,
 }: HeaderProps) {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const route = useRouter();
+  const mobileMenuOpen = route.overlay === "menu";
+
+  const toggleMobileMenu = () => {
+    if (mobileMenuOpen) {
+      router.closeOverlay();
+    } else {
+      router.openOverlay("menu");
+    }
+  };
+
+  const handleMobileNavItemClick = (tool: "home" | ToolId) => {
+    if (mobileMenuOpen) {
+      router.closeOverlay();
+    }
+    onNavigate(tool);
+  };
 
   return (
     <header className="folio-header" role="banner">
@@ -104,11 +121,11 @@ export function Header({
           <button
             type="button"
             className="mobile-menu-toggle mobile-only"
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            aria-label="Toggle navigation menu"
+            onClick={toggleMobileMenu}
+            aria-label={mobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
             aria-expanded={mobileMenuOpen}
           >
-            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" fill="none" strokeWidth="2">
+            <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" strokeWidth="2">
               {mobileMenuOpen ? (
                 <path d="M18 6L6 18M6 6l12 12" />
               ) : (
@@ -119,90 +136,116 @@ export function Header({
         </div>
       </div>
 
-      {/* Mobile Menu Dropdown */}
+      {/* Mobile Menu Dropdown / Drawer */}
       {mobileMenuOpen && (
-        <div className="mobile-nav-drawer mobile-only">
-          <button
-            type="button"
-            className="mobile-nav-item"
-            onClick={() => {
-              onNavigate("home");
-              setMobileMenuOpen(false);
-            }}
-          >
-            Home
-          </button>
-          <button
-            type="button"
-            className="mobile-nav-item"
-            onClick={() => {
-              onNavigate("images-to-pdf");
-              setMobileMenuOpen(false);
-            }}
-          >
-            Images to PDF (Featured)
-          </button>
-          <button
-            type="button"
-            className="mobile-nav-item"
-            onClick={() => {
-              onNavigate("merge-pdf");
-              setMobileMenuOpen(false);
-            }}
-          >
-            Merge PDFs
-          </button>
-          <button
-            type="button"
-            className="mobile-nav-item"
-            onClick={() => {
-              onNavigate("split-pdf");
-              setMobileMenuOpen(false);
-            }}
-          >
-            Split PDF
-          </button>
-          <button
-            type="button"
-            className="mobile-nav-item"
-            onClick={() => {
-              onNavigate("rotate-pdf");
-              setMobileMenuOpen(false);
-            }}
-          >
-            Rotate pages
-          </button>
-          <button
-            type="button"
-            className="mobile-nav-item"
-            onClick={() => {
-              onNavigate("pdf-to-images");
-              setMobileMenuOpen(false);
-            }}
-          >
-            PDF to images
-          </button>
-          <div className="mobile-nav-separator" />
-          <button
-            type="button"
-            className="mobile-nav-item"
-            onClick={() => {
-              onOpenPrivacy();
-              setMobileMenuOpen(false);
-            }}
-          >
-            Privacy Guarantee
-          </button>
-          <button
-            type="button"
-            className="mobile-nav-item"
-            onClick={() => {
-              onOpenHelp();
-              setMobileMenuOpen(false);
-            }}
-          >
-            Help & Limits
-          </button>
+        <div className="mobile-nav-drawer mobile-only" role="dialog" aria-modal="true" aria-label="Navigation Menu">
+          <div className="mobile-nav-header">
+            <span className="mobile-nav-title">All PDF Tools</span>
+            <button
+              type="button"
+              className="mobile-nav-close-btn"
+              onClick={() => router.closeOverlay()}
+              aria-label="Close menu"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="mobile-nav-list">
+            <button
+              type="button"
+              className={`mobile-nav-item ${currentView === "home" ? "active" : ""}`}
+              onClick={() => handleMobileNavItemClick("home")}
+            >
+              🏠 Home
+            </button>
+            <button
+              type="button"
+              className={`mobile-nav-item ${currentView === "compress-pdf" ? "active" : ""}`}
+              onClick={() => handleMobileNavItemClick("compress-pdf")}
+            >
+              🗜 Compress PDF
+            </button>
+            <button
+              type="button"
+              className={`mobile-nav-item ${currentView === "images-to-pdf" ? "active" : ""}`}
+              onClick={() => handleMobileNavItemClick("images-to-pdf")}
+            >
+              🖼 Images to PDF
+            </button>
+            <button
+              type="button"
+              className={`mobile-nav-item ${currentView === "merge-pdf" ? "active" : ""}`}
+              onClick={() => handleMobileNavItemClick("merge-pdf")}
+            >
+              📑 Merge PDFs
+            </button>
+            <button
+              type="button"
+              className={`mobile-nav-item ${currentView === "split-pdf" ? "active" : ""}`}
+              onClick={() => handleMobileNavItemClick("split-pdf")}
+            >
+              ✂ Split PDF
+            </button>
+            <button
+              type="button"
+              className={`mobile-nav-item ${currentView === "rotate-pdf" ? "active" : ""}`}
+              onClick={() => handleMobileNavItemClick("rotate-pdf")}
+            >
+              🔄 Rotate pages
+            </button>
+            <button
+              type="button"
+              className={`mobile-nav-item ${currentView === "pdf-to-images" ? "active" : ""}`}
+              onClick={() => handleMobileNavItemClick("pdf-to-images")}
+            >
+              📷 PDF to images
+            </button>
+            <button
+              type="button"
+              className={`mobile-nav-item ${currentView === "organize-pdf" ? "active" : ""}`}
+              onClick={() => handleMobileNavItemClick("organize-pdf")}
+            >
+              🗂 Organize PDF
+            </button>
+            <button
+              type="button"
+              className={`mobile-nav-item ${currentView === "page-numbers" ? "active" : ""}`}
+              onClick={() => handleMobileNavItemClick("page-numbers")}
+            >
+              🔢 Page numbers
+            </button>
+            <button
+              type="button"
+              className={`mobile-nav-item ${currentView === "watermark" ? "active" : ""}`}
+              onClick={() => handleMobileNavItemClick("watermark")}
+            >
+              🏷 Watermark
+            </button>
+
+            <div className="mobile-nav-separator" />
+
+            <button
+              type="button"
+              className="mobile-nav-item mobile-sub-item"
+              onClick={() => {
+                router.closeOverlay();
+                onOpenPrivacy();
+              }}
+            >
+              🔒 Privacy Guarantee
+            </button>
+            <button
+              type="button"
+              className="mobile-nav-item mobile-sub-item"
+              onClick={() => {
+                router.closeOverlay();
+                onOpenHelp();
+              }}
+            >
+              ❓ Help & Specifications
+            </button>
+          </div>
         </div>
       )}
     </header>

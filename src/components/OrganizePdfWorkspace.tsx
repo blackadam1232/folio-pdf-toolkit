@@ -125,11 +125,21 @@ export function OrganizePdfWorkspace({ onBackToHome }: OrganizePdfWorkspaceProps
       />
 
       <div className="tool-workspace-header">
-        <div>
-          <h1 className="document-title">Organize PDF</h1>
-          <p className="tool-header-subtitle">
-            Rearrange, rotate, or remove pages from your document.
-          </p>
+        <div className="header-nav-inline">
+          <button
+            type="button"
+            className="btn-inapp-back"
+            onClick={onBackToHome}
+            aria-label="Back to all tools"
+          >
+            ← All tools
+          </button>
+          <div>
+            <h1 className="document-title">Organize PDF</h1>
+            <p className="tool-header-subtitle">
+              Rearrange, rotate, or remove pages from your document.
+            </p>
+          </div>
         </div>
         {file && (
           <button
