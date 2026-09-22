@@ -332,6 +332,32 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
           </aside>
         </div>
       )}
+
+      {/* Mobile Sticky Bottom Action Bar */}
+      {file && (
+        <div className="mobile-bottom-bar mobile-only">
+          <button
+            type="button"
+            className="btn-mobile-create-pdf"
+            onClick={zipUrl ? () => {
+              const a = document.createElement("a");
+              a.href = zipUrl;
+              a.download = `${file.name.replace(/\.[^/.]+$/, "")}_images.zip`;
+              a.click();
+            } : handleConvert}
+            disabled={isProcessing}
+          >
+            <ImageIcon className="btn-pdf-icon" />
+            <span>
+              {isProcessing
+                ? "Rendering…"
+                : zipUrl
+                ? "Download ZIP"
+                : "Convert to Images"}
+            </span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

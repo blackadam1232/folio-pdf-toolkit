@@ -224,6 +224,32 @@ export function SplitPdfWorkspace({ onBackToHome }: SplitPdfWorkspaceProps) {
           </aside>
         </div>
       )}
+
+      {/* Mobile Sticky Bottom Action Bar */}
+      {file && (
+        <div className="mobile-bottom-bar mobile-only">
+          <button
+            type="button"
+            className="btn-mobile-create-pdf"
+            onClick={downloadUrl ? () => {
+              const a = document.createElement("a");
+              a.href = downloadUrl;
+              a.download = downloadName;
+              a.click();
+            } : handleSplit}
+            disabled={isProcessing || !rangeInput.trim()}
+          >
+            <ScissorsIcon className="btn-pdf-icon" />
+            <span>
+              {isProcessing
+                ? "Extracting…"
+                : downloadUrl
+                ? `Download ${exportMode === "zip" ? "ZIP" : "PDF"}`
+                : "Extract Pages"}
+            </span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

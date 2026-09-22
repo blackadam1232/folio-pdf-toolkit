@@ -54,7 +54,7 @@ export function Header({
           {toolTitle && currentView !== "home" && (
             <>
               <span className="header-divider" aria-hidden="true">|</span>
-              <span className="header-tool-title">{toolTitle}</span>
+              <span className="header-tool-title" title={toolTitle}>{toolTitle}</span>
             </>
           )}
         </div>

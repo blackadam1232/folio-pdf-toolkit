@@ -1107,7 +1107,7 @@ input, select, textarea {
   }
 }
 
-/* Clean White Page Card */
+/* Clean White Page Card with True Miniature Paper Sheet */
 .page-card {
   background-color: #ffffff;
   border: 1px solid var(--border-subtle);
@@ -1121,55 +1121,181 @@ input, select, textarea {
   user-select: none;
   min-width: 0;
   width: 100%;
-  overflow: hidden;
   box-sizing: border-box;
 }
 
 .page-card:hover {
-  box-shadow: var(--shadow-sm);
-  border-color: #d6cfc3;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border-color: #c4beaf;
 }
 
-/* Selected Card: Soft Orange Border */
+/* Selected Card: High contrast teal border and soft green tint */
 .page-card.selected {
-  border-color: var(--border-selected);
-  box-shadow: 0 0 0 1px var(--border-selected);
-}
-
-/* Active Inspected Card (when custom per page is active) */
-.page-card.active-inspect:not(.selected) {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 1px var(--color-primary);
+  background-color: #f7fbf9;
+  box-shadow: 0 0 0 2px var(--color-primary);
 }
 
-/* Selection Checkbox Circle */
+/* Active Inspected Card in Single Page Mode: Distinct Amber Halo */
+.page-card.active-inspect {
+  outline: 2px solid #d97706;
+  outline-offset: 1px;
+}
+
+/* Both active and selected */
+.page-card.selected.active-inspect {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary), 0 0 0 4px rgba(217, 119, 6, 0.4);
+}
+
+/* Selection Checkbox with visible checkmark and accessible touch target */
 .selection-check-circle {
   position: absolute;
-  top: 10px;
-  left: 10px;
-  width: 20px;
-  height: 20px;
+  top: 12px;
+  left: 12px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  border: 1.5px solid #c9c3b8;
+  border: 2px solid #9c9588;
   background-color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2;
+  z-index: 10;
+  cursor: pointer;
   transition: all 0.15s ease;
+  padding: 0;
+}
+
+@media (max-width: 768px) {
+  .selection-check-circle::after {
+    content: "";
+    position: absolute;
+    top: -10px;
+    left: -10px;
+    right: -10px;
+    bottom: -10px;
+  }
+}
+
+.selection-check-circle:hover {
+  border-color: var(--color-primary);
+  transform: scale(1.05);
 }
 
 .selection-check-circle.checked {
   background-color: var(--color-primary);
   border-color: var(--color-primary);
+  box-shadow: 0 1px 3px rgba(32, 80, 72, 0.3);
+}
+
+.uncheck-dot {
+  display: none;
 }
 
 .check-svg {
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
   color: #ffffff;
 }
 
+/* Quick Rotate button on card hover/focus */
+.card-quick-rotate {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--border-subtle);
+  background-color: rgba(255, 255, 255, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  cursor: pointer;
+}
+
+.page-card:hover .card-quick-rotate,
+.page-card:focus-within .card-quick-rotate {
+  opacity: 1;
+}
+
+@media (max-width: 768px) {
+  .card-quick-rotate {
+    opacity: 0.85;
+  }
+}
+
+.rotate-icon-svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-main);
+}
+
+/* True Miniature Paper Sheet (Contains full image without cropping) */
+.sheet-backdrop {
+  width: 100%;
+  height: 180px;
+  background-color: #f2eee3;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+@media (max-width: 600px) {
+  .sheet-backdrop {
+    height: 150px;
+    padding: 6px;
+  }
+}
+
+.sheet-paper {
+  max-width: 100%;
+  max-height: 100%;
+  background-color: #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  border-radius: 1px;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+  transition: aspect-ratio 0.2s ease;
+}
+
+.sheet-printable-area {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.sheet-image-wrap {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.sheet-img {
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+  transition: transform 0.2s ease;
+}
+
+/* Fallback for legacy card-thumb-wrap if referenced */
 .card-thumb-wrap {
   width: 100%;
   aspect-ratio: 1 / 1;
@@ -1185,13 +1311,114 @@ input, select, textarea {
 }
 
 .card-thumb-img {
-  width: 100%;
-  height: 100%;
   max-width: 100%;
   max-height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
   transition: transform 0.2s ease;
+}
+
+/* Real PDF Page Thumbnail styles */
+.pdf-thumb-sheet-wrap {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background-color: #ffffff;
+  border-radius: 2px;
+}
+
+.pdf-thumb-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  transition: transform 0.2s ease;
+  display: block;
+}
+
+.pdf-thumb-skeleton {
+  width: 100%;
+  height: 100%;
+  min-height: 120px;
+  background-color: #ede8df;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-shimmer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.45) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: thumbShimmer 1.5s infinite;
+}
+
+@keyframes thumbShimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.skeleton-page-badge {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-light);
+  z-index: 2;
+}
+
+.pdf-thumb-error {
+  width: 100%;
+  height: 100%;
+  min-height: 120px;
+  background-color: #fdf5f2;
+  border: 1px dashed #e57373;
+  border-radius: 3px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.pdf-thumb-error .error-icon {
+  font-size: 18px;
+  color: #c62828;
+}
+
+.pdf-thumb-error .error-text {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.btn-retry-thumb {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background-color: #ffffff;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.btn-retry-thumb:hover {
+  background-color: var(--color-primary);
+  color: #ffffff;
 }
 
 .card-meta {
@@ -2457,46 +2684,131 @@ input, select, textarea {
 }
 
 @media (max-width: 768px) {
-  .hero-headline {
-    font-size: 40px;
+  /* Responsive Header for Mobile */
+  .folio-header {
+    height: 52px;
   }
-  .tools-cards-grid {
-    grid-template-columns: 1fr 1fr;
+  .header-container {
+    height: 52px;
+    padding: 0 16px;
   }
-  .process-steps-row {
-    flex-direction: column;
-    gap: 20px;
+  .brand-link {
+    font-size: 20px;
+    min-height: 44px;
+    min-width: 44px;
+    display: flex;
+    align-items: center;
   }
-  .step-divider {
-    display: none;
+  .header-tool-title {
+    font-size: 13px;
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    background-color: #e5ede7;
+    color: var(--color-primary);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
   }
-  .footer-container {
-    flex-direction: column;
-    gap: 12px;
-    text-align: center;
+  .mobile-menu-toggle {
+    min-height: 44px;
+    min-width: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
   }
 
-  /* Mobile Images to PDF View (Right Phone in Image 2) */
+  /* Responsive Workspace Spacing (Safe from header overlap) */
+  .folio-workspace {
+    padding: 16px 16px calc(76px + env(safe-area-inset-bottom, 12px)) 16px !important;
+    box-sizing: border-box;
+    width: 100%;
+  }
+
+  .workspace-title-bar {
+    gap: 10px;
+    margin-bottom: 14px;
+    width: 100%;
+  }
+  .title-left-group {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+  .btn-inapp-back {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-primary);
+    background-color: #ffffff;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+  }
+  .document-title {
+    font-size: 22px;
+    line-height: 1.25;
+    margin: 0;
+  }
+  .title-controls-group {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .view-mode-toggle {
+    flex: 1;
+    display: flex;
+  }
+  .btn-toggle-tab {
+    flex: 1;
+    text-align: center;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+  }
+
+  /* Mobile Controls Strip */
   .mobile-action-bar {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 16px;
+    gap: 10px;
+    margin-bottom: 14px;
+    width: 100%;
   }
   .btn-mobile-add {
     background-color: var(--color-primary);
     color: #ffffff;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
-    padding: 8px 20px;
+    height: 42px;
+    padding: 0 16px;
     border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex-shrink: 0;
   }
   .mobile-sort-wrap {
     flex: 1;
     background-color: #ffffff;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
-    padding: 4px 8px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
   }
   .select-mobile-sort {
     width: 100%;
@@ -2504,51 +2816,70 @@ input, select, textarea {
     background: transparent;
     font-size: 13px;
     outline: none;
+    font-weight: 500;
+    color: var(--text-main);
   }
 
-  /* Mobile Sticky Bottom Action Area */
-  .folio-workspace.images-workspace {
-    padding-bottom: 120px; /* Prevent sticky bar from covering content */
-  }
-
-  .mobile-bottom-bar {
+  /* Compact Sleek Mobile Bottom Action Area */
+  .mobile-bottom-bar,
+  .mobile-sticky-bottom-bar {
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
     background-color: #ffffff;
     border-top: 1px solid var(--border-subtle);
-    padding: 10px 16px env(safe-area-inset-bottom, 12px);
+    padding: 8px 16px max(10px, env(safe-area-inset-bottom, 10px));
     display: flex;
-    flex-direction: column;
-    gap: 8px;
-    z-index: 50;
-    box-shadow: 0 -2px 10px rgba(0,0,0,0.06);
-  }
-
-  .mobile-bottom-actions-row {
-    display: flex;
+    flex-direction: row;
+    align-items: center;
     gap: 10px;
+    z-index: 50;
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.08);
   }
 
   .btn-bottom-sub {
-    flex: 1;
-    height: 38px;
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
     background-color: var(--bg-page);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
-    font-size: 13px;
-    font-weight: 500;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    padding: 0;
   }
 
   .btn-sub-icon {
-    width: 16px;
-    height: 16px;
-    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    color: var(--text-main);
+  }
+
+  .btn-mobile-create-pdf {
+    flex: 1;
+    height: 44px;
+    background-color: var(--color-primary);
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 16px;
+    transition: background-color 0.15s ease;
+  }
+
+  .btn-mobile-create-pdf:active {
+    background-color: var(--color-primary-hover);
+  }
+
+  .btn-mobile-create-pdf:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
   }
 
   .mobile-result-banner {
@@ -2579,22 +2910,12 @@ input, select, textarea {
     color: #ffffff;
     font-size: 13px;
     font-weight: 600;
-    padding: 6px 14px;
-    border-radius: var(--radius-sm);
-  }
-
-  .btn-mobile-create-pdf {
-    width: 100%;
-    height: 46px;
-    background-color: var(--color-primary);
-    color: #ffffff;
-    font-size: 15px;
-    font-weight: 600;
+    height: 38px;
+    padding: 0 14px;
     border-radius: var(--radius-sm);
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
   }
 
   /* Mobile Slide-up Drawer for Settings */

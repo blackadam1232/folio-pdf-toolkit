@@ -394,6 +394,32 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
           </aside>
         </div>
       )}
+
+      {/* Mobile Sticky Bottom Action Bar */}
+      {file && (
+        <div className="mobile-bottom-bar mobile-only">
+          <button
+            type="button"
+            className="btn-mobile-create-pdf"
+            onClick={downloadUrl ? () => {
+              const a = document.createElement("a");
+              a.href = downloadUrl;
+              a.download = downloadName;
+              a.click();
+            } : handleApplyNumbers}
+            disabled={isProcessing}
+          >
+            <NumberIcon className="btn-pdf-icon" />
+            <span>
+              {isProcessing
+                ? "Numbering…"
+                : downloadUrl
+                ? "Download Numbered PDF"
+                : "Add Page Numbers"}
+            </span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

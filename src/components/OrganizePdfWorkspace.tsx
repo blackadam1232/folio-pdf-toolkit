@@ -1,6 +1,7 @@
 import React, { useState, useRef } from "react";
 import { inspectPdfFile, organizePdfPages } from "../lib/pdfEngine";
 import { GridIcon, RotateIcon, TrashIcon, PdfDocIcon } from "./Icons";
+import { PdfPageThumbnail } from "./PdfPageThumbnail";
 
 interface OrganizePdfWorkspaceProps {
   onBackToHome: () => void;
@@ -192,13 +193,16 @@ export function OrganizePdfWorkspace({ onBackToHome }: OrganizePdfWorkspaceProps
                     {p.isDeleted && <span className="deleted-tag">Deleted</span>}
                   </div>
 
-                  <div
-                    className="organize-card-sheet"
-                    style={{ transform: `rotate(${p.rotation}deg)` }}
-                  >
-                    <div className="organize-sheet-header" />
-                    <div className="organize-sheet-line line-1" />
-                    <div className="organize-sheet-line line-2" />
+                  <div className="organize-card-sheet">
+                    {file && (
+                      <PdfPageThumbnail
+                        file={file}
+                        pageNumber={p.originalIndex + 1}
+                        rotation={p.rotation}
+                        scale={0.5}
+                        alt={`Page ${p.originalIndex + 1}`}
+                      />
+                    )}
                     <span className="organize-sheet-num">{idx + 1}</span>
                   </div>
 
@@ -280,6 +284,32 @@ export function OrganizePdfWorkspace({ onBackToHome }: OrganizePdfWorkspaceProps
               </div>
             )}
           </aside>
+        </div>
+      )}
+
+      {/* Mobile Sticky Bottom Action Bar */}
+      {file && (
+        <div className="mobile-bottom-bar mobile-only">
+          <button
+            type="button"
+            className="btn-mobile-create-pdf"
+            onClick={downloadUrl ? () => {
+              const a = document.createElement("a");
+              a.href = downloadUrl;
+              a.download = downloadName;
+              a.click();
+            } : handleExport}
+            disabled={isProcessing || activeCount === 0}
+          >
+            <GridIcon className="btn-pdf-icon" />
+            <span>
+              {isProcessing
+                ? "Saving…"
+                : downloadUrl
+                ? "Download PDF"
+                : `Save PDF (${activeCount} pgs)`}
+            </span>
+          </button>
         </div>
       )}
     </div>

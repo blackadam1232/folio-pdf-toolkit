@@ -420,6 +420,32 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
           </aside>
         </div>
       )}
+
+      {/* Mobile Sticky Bottom Action Bar */}
+      {file && (
+        <div className="mobile-bottom-bar mobile-only">
+          <button
+            type="button"
+            className="btn-mobile-create-pdf"
+            onClick={downloadUrl ? () => {
+              const a = document.createElement("a");
+              a.href = downloadUrl;
+              a.download = downloadName;
+              a.click();
+            } : handleApplyWatermark}
+            disabled={isProcessing}
+          >
+            <StampIcon className="btn-pdf-icon" />
+            <span>
+              {isProcessing
+                ? "Applying…"
+                : downloadUrl
+                ? "Download PDF"
+                : "Apply Watermark"}
+            </span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

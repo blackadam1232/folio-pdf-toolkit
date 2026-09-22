@@ -17,9 +17,13 @@ import {
 import { sortImageItems } from "../lib/sort";
 import { calculateGeometry } from "../lib/layout";
 import { loadSampleSet } from "../lib/sampleImages";
+import { router, useRouter } from "../lib/router";
 import {
-  FolioLogoIcon,
-  LockIcon,
+  documentSessionStore,
+  useDocumentSession,
+} from "../lib/documentSessionStore";
+import { ThumbnailSheet } from "./ThumbnailSheet";
+import {
   RotateIcon,
   TrashIcon,
   CheckIcon,
@@ -32,40 +36,34 @@ interface ImagesToPdfWorkspaceProps {
   onBackToHome: () => void;
 }
 
-const DEFAULT_OPTIONS: PdfOptions = {
-  pageSize: "A4",
-  orientation: "Portrait",
-  fit: "Contain",
-  profile: "Screen/Mobile",
-  marginPreset: "Small",
-  marginMm: 12,
-  customMargins: [12, 12, 12, 12],
-  filename: "My travel pages.pdf",
-  sort: "natural-asc",
-  manualOrder: [],
-};
-
 export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps) {
-  const [items, setItems] = useState<ImageItem[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [activeInspectId, setActiveInspectId] = useState<string>("");
-  const [viewMode, setViewMode] = useState<"overview" | "single">("overview");
-  const [scopeMode, setScopeMode] = useState<"all" | "custom">("all");
-  const [options, setOptions] = useState<PdfOptions>(DEFAULT_OPTIONS);
+  const TOOL_ID = "images-to-pdf";
+  const session = useDocumentSession(TOOL_ID);
+  const route = useRouter();
 
-  const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [progress, setProgress] = useState<GenerationProgress | null>(null);
-  const [result, setResult] = useState<ConversionResult | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string>("");
+  const items = session.items;
+  const selectedIds = useMemo(
+    () => new Set(session.selectedIds),
+    [session.selectedIds]
+  );
+  const activeInspectId = session.activeInspectId;
+  const viewMode = session.viewMode;
+  const options = session.options;
+  const isProcessing = session.jobStatus === "processing";
+  const progress = session.progress;
+  const result = session.result;
+
+  const [scopeMode, setScopeMode] = useState<"all" | "custom">("all");
+  const [errorMessage, setErrorMessage] = useState<string>(session.errorMessage);
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState<boolean>(false);
   const [isLoadingSamples, setIsLoadingSamples] = useState<boolean>(false);
   const [singleZoom, setSingleZoom] = useState<number>(1);
+  const [fitMode, setFitMode] = useState<"page" | "width" | "custom">("page");
   const [jumpPageInput, setJumpPageInput] = useState<string>("1");
+  const [undoStack, setUndoStack] = useState<ImageItem[] | null>(null);
+  const [undoMessage, setUndoMessage] = useState<string>("");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-
-  // Clean empty initial state - no default images auto-loaded
 
   // Sorted items based on active sort options
   const sortedItems = useMemo(() => {
@@ -75,20 +73,18 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
   // Active inspect item for single page mode
   const activeInspectItem = useMemo(() => {
     if (!sortedItems.length) return null;
-    return sortedItems.find((it) => it.id === activeInspectId) || sortedItems[0];
+    return (
+      sortedItems.find((it) => it.id === activeInspectId) || sortedItems[0]
+    );
   }, [sortedItems, activeInspectId]);
 
   const activeInspectIndex = useMemo(() => {
     if (!activeInspectItem) return 0;
-    return Math.max(0, sortedItems.findIndex((it) => it.id === activeInspectItem.id));
+    return Math.max(
+      0,
+      sortedItems.findIndex((it) => it.id === activeInspectItem.id)
+    );
   }, [sortedItems, activeInspectItem]);
-
-  // Mark result outdated when options or items change
-  const markOutdated = () => {
-    if (result && !result.isOutdated) {
-      setResult((prev) => (prev ? { ...prev, isOutdated: true } : null));
-    }
-  };
 
   // Active target item when configuring scope (custom per page vs all)
   const activeTargetItem = useMemo(() => {
@@ -101,23 +97,11 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
 
   // Target item IDs for per-page updates
   const targetIds = useMemo(() => {
-    if (selectedIds.size > 1) {
-      return Array.from(selectedIds);
-    }
-    if (selectedIds.size === 1) {
+    if (selectedIds.size > 0) {
       return Array.from(selectedIds);
     }
     return activeTargetItem ? [activeTargetItem.id] : [];
   }, [selectedIds, activeTargetItem]);
-
-  // Effective options for the currently active item
-  const activeItemOptions = useMemo((): PdfOptions => {
-    if (!activeInspectItem) return options;
-    return {
-      ...options,
-      ...(activeInspectItem.customOptions || {}),
-    };
-  }, [activeInspectItem, options]);
 
   // Options displayed in the settings controls
   const currentDisplayOptions: PdfOptions = useMemo(() => {
@@ -130,8 +114,16 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     return options;
   }, [scopeMode, activeTargetItem, options]);
 
-  // Handler for setting changes: updates custom per-page options when in "custom" mode,
-  // or updates global options when in "all" mode.
+  // Effective options for the currently active item
+  const activeItemOptions = useMemo((): PdfOptions => {
+    if (!activeInspectItem) return options;
+    return {
+      ...options,
+      ...(activeInspectItem.customOptions || {}),
+    };
+  }, [activeInspectItem, options]);
+
+  // Handle option changes
   const handleOptionChange = <K extends keyof PerPageOptions>(
     key: K,
     value: PerPageOptions[K],
@@ -139,73 +131,41 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
   ) => {
     if (scopeMode === "custom") {
       if (targetIds.length === 0) return;
-      setItems((prevItems) =>
-        prevItems.map((it) => {
-          if (targetIds.includes(it.id)) {
-            const currentCustom = it.customOptions || {};
-            return {
-              ...it,
-              customOptions: {
-                ...currentCustom,
-                [key]: value,
-                ...(extraUpdates || {}),
-              },
-            };
-          }
-          return it;
-        })
-      );
-      markOutdated();
-    } else {
-      setOptions((prev) => ({
-        ...prev,
-        [key]: value,
-        ...(extraUpdates || {}),
-      }));
-      markOutdated();
-    }
-  };
-
-  // Reset custom per-page options back to document defaults
-  const handleResetCustomOptions = (idsToReset: string[]) => {
-    setItems((prevItems) =>
-      prevItems.map((it) => {
-        if (idsToReset.includes(it.id)) {
-          const updated = { ...it };
-          delete updated.customOptions;
-          return updated;
+      const updated = items.map((it) => {
+        if (targetIds.includes(it.id)) {
+          const currentCustom = it.customOptions || {};
+          return {
+            ...it,
+            customOptions: {
+              ...currentCustom,
+              [key]: value,
+              ...(extraUpdates || {}),
+            },
+          };
         }
         return it;
-      })
-    );
-    markOutdated();
+      });
+      documentSessionStore.setItems(TOOL_ID, updated);
+    } else {
+      documentSessionStore.setOptions(TOOL_ID, {
+        [key]: value,
+        ...(extraUpdates || {}),
+      });
+    }
   };
 
-  // Aspect ratio for preview canvas / simulated sheet
-  const previewAspectRatio = useMemo(() => {
-    if (!activeInspectItem) return "210 / 297";
-    const eff = {
-      ...options,
-      ...(activeInspectItem.customOptions || {}),
-    };
-    const isQuarter = activeInspectItem.rotation % 180 !== 0;
-    const effW = isQuarter ? activeInspectItem.height : activeInspectItem.width;
-    const effH = isQuarter ? activeInspectItem.width : activeInspectItem.height;
-
-    if (eff.pageSize === "Original") {
-      return `${effW} / ${effH}`;
-    }
-    let landscape = false;
-    if (eff.orientation === "Landscape") {
-      landscape = true;
-    } else if (eff.orientation === "Auto") {
-      landscape = effW > effH;
-    }
-    if (eff.pageSize === "Letter") {
-      return landscape ? "11 / 8.5" : "8.5 / 11";
-    }
-    return landscape ? "297 / 210" : "210 / 297";
-  }, [activeInspectItem, options]);
+  // Reset custom per-page options
+  const handleResetCustomOptions = (idsToReset: string[]) => {
+    const updated = items.map((it) => {
+      if (idsToReset.includes(it.id)) {
+        const itemCopy = { ...it };
+        delete itemCopy.customOptions;
+        return itemCopy;
+      }
+      return it;
+    });
+    documentSessionStore.setItems(TOOL_ID, updated);
+  };
 
   // Add files
   const handleAddFiles = async (fileList: FileList | File[]) => {
@@ -257,99 +217,117 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     }
 
     if (newItems.length > 0) {
-      setItems((prev) => [...prev, ...newItems]);
+      documentSessionStore.setItems(TOOL_ID, [...items, ...newItems]);
       if (!activeInspectId && newItems[0]) {
-        setActiveInspectId(newItems[0].id);
+        documentSessionStore.setActiveInspectId(TOOL_ID, newItems[0].id);
       }
-      markOutdated();
+    }
+  };
+
+  // Load sample photos
+  const handleLoadSamples = async () => {
+    setIsLoadingSamples(true);
+    setErrorMessage("");
+    try {
+      const sampleItems = await loadSampleSet();
+      documentSessionStore.setItems(TOOL_ID, [...items, ...sampleItems]);
+      if (!activeInspectId && sampleItems[0]) {
+        documentSessionStore.setActiveInspectId(TOOL_ID, sampleItems[0].id);
+      }
+    } catch (err) {
+      setErrorMessage("Could not load sample photos.");
+    } finally {
+      setIsLoadingSamples(false);
     }
   };
 
   // Selection toggle
   const toggleSelection = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
+    documentSessionStore.toggleSelectId(TOOL_ID, id);
   };
 
-  // Select all or clear selection
   const handleSelectAll = () => {
     if (selectedIds.size === items.length) {
-      setSelectedIds(new Set());
+      documentSessionStore.clearSelection(TOOL_ID);
     } else {
-      setSelectedIds(new Set(items.map((it) => it.id)));
+      documentSessionStore.selectAll(TOOL_ID);
     }
   };
 
   const handleClearSelection = () => {
-    setSelectedIds(new Set());
+    documentSessionStore.clearSelection(TOOL_ID);
   };
 
-  // Batch rotate selected
+  // Rotate selected
   const handleRotateSelected = () => {
     if (!selectedIds.size) return;
-    setItems((prev) =>
-      prev.map((it) =>
-        selectedIds.has(it.id)
-          ? { ...it, rotation: (it.rotation + 90) % 360 }
-          : it
-      )
-    );
-    markOutdated();
+    documentSessionStore.rotateSelected(TOOL_ID, 90);
   };
 
-  // Batch remove selected
+  // Rotate single item
+  const handleRotateSingle = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    documentSessionStore.rotateItem(TOOL_ID, id, 90);
+  };
+
+  // Move selected earlier / later (essential for touch/mobile)
+  const handleMoveSelectedEarlier = () => {
+    if (!selectedIds.size) return;
+    const currentOrder = [...sortedItems];
+    for (let i = 1; i < currentOrder.length; i++) {
+      if (selectedIds.has(currentOrder[i].id) && !selectedIds.has(currentOrder[i - 1].id)) {
+        const temp = currentOrder[i - 1];
+        currentOrder[i - 1] = currentOrder[i];
+        currentOrder[i] = temp;
+      }
+    }
+    documentSessionStore.setItems(TOOL_ID, currentOrder);
+    documentSessionStore.setOptions(TOOL_ID, {
+      sort: "manual",
+      manualOrder: currentOrder.map((it) => it.id),
+    });
+  };
+
+  const handleMoveSelectedLater = () => {
+    if (!selectedIds.size) return;
+    const currentOrder = [...sortedItems];
+    for (let i = currentOrder.length - 2; i >= 0; i--) {
+      if (selectedIds.has(currentOrder[i].id) && !selectedIds.has(currentOrder[i + 1].id)) {
+        const temp = currentOrder[i + 1];
+        currentOrder[i + 1] = currentOrder[i];
+        currentOrder[i] = temp;
+      }
+    }
+    documentSessionStore.setItems(TOOL_ID, currentOrder);
+    documentSessionStore.setOptions(TOOL_ID, {
+      sort: "manual",
+      manualOrder: currentOrder.map((it) => it.id),
+    });
+  };
+
+  // Batch remove with Undo
   const handleRemoveSelected = () => {
     if (!selectedIds.size) return;
-    setItems((prev) => {
-      const remaining = prev.filter((it) => {
-        if (selectedIds.has(it.id)) {
-          URL.revokeObjectURL(it.objectUrl);
-          return false;
-        }
-        return true;
-      });
-      if (selectedIds.has(activeInspectId)) {
-        setActiveInspectId(remaining[0]?.id || "");
-      }
-      return remaining;
-    });
-    setSelectedIds(new Set());
-    markOutdated();
+    const toRemove = items.filter((it) => selectedIds.has(it.id));
+    setUndoStack(toRemove);
+    setUndoMessage(`${toRemove.length} page${toRemove.length === 1 ? "" : "s"} removed.`);
+    documentSessionStore.removeSelected(TOOL_ID);
   };
 
-  // Remove single item
-  const handleRemoveSingle = (id: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setItems((prev) => {
-      const target = prev.find((it) => it.id === id);
-      if (target) URL.revokeObjectURL(target.objectUrl);
-      const remaining = prev.filter((it) => it.id !== id);
-      if (activeInspectId === id) {
-        setActiveInspectId(remaining[0]?.id || "");
-      }
-      return remaining;
-    });
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-    markOutdated();
+  // Undo removal
+  const handleUndo = () => {
+    if (undoStack && undoStack.length > 0) {
+      documentSessionStore.setItems(TOOL_ID, [...items, ...undoStack]);
+      setUndoStack(null);
+      setUndoMessage("");
+    }
   };
 
   // Handle Sort
   const handleSortChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value as SortMode;
-    setOptions((prev) => ({ ...prev, sort: val }));
-    markOutdated();
+    documentSessionStore.setOptions(TOOL_ID, { sort: val });
   };
 
   // Jump to page
@@ -359,7 +337,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= sortedItems.length) {
       const target = sortedItems[pageNum - 1];
       if (target) {
-        setActiveInspectId(target.id);
+        documentSessionStore.setActiveInspectId(TOOL_ID, target.id);
         const cardEl = document.getElementById(`page-card-${target.id}`);
         cardEl?.scrollIntoView({ behavior: "smooth", block: "center" });
       }
@@ -372,43 +350,20 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
       setErrorMessage("Please add at least one image first.");
       return;
     }
-
     setErrorMessage("");
-    setIsProcessing(true);
-    setProgress({
-      current: 0,
-      total: sortedItems.length,
-      currentFilename: "Preparing PDF…",
-      phase: "preparing",
-      percent: 0,
-    });
+    router.navigate({ toolId: TOOL_ID, stage: "processing" });
 
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    try {
-      const res = await generatePdf(
-        items,
-        options,
-        (p) => setProgress(p),
-        controller.signal
-      );
-
-      if (result) URL.revokeObjectURL(result.url);
-      setResult(res);
+    const res = await documentSessionStore.startGeneration(TOOL_ID);
+    if (res) {
+      router.navigate({ toolId: TOOL_ID, stage: "result", replace: true });
       setMobileSettingsOpen(false);
-    } catch (err) {
-      const msg = (err as Error).message;
-      if (msg.includes("cancelled")) {
-        setErrorMessage("Generation was cancelled.");
-      } else {
-        setErrorMessage(msg || "Failed to generate PDF.");
-      }
-    } finally {
-      setIsProcessing(false);
-      setProgress(null);
-      abortControllerRef.current = null;
     }
+  };
+
+  // Cancel Generation
+  const handleCancelGeneration = () => {
+    documentSessionStore.cancelGeneration(TOOL_ID);
+    router.navigate({ toolId: TOOL_ID, stage: "editor", replace: true });
   };
 
   // Download PDF
@@ -422,20 +377,31 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     document.body.removeChild(a);
   };
 
-  // Shared geometry for preview canvas
-  const inspectGeometry = useMemo(() => {
-    if (!activeInspectItem) return null;
-    try {
-      return calculateGeometry({
-        imageWidth: activeInspectItem.width,
-        imageHeight: activeInspectItem.height,
-        rotation: activeInspectItem.rotation,
-        options: activeItemOptions,
-      });
-    } catch (err) {
-      return null;
+  // Preview Aspect Ratio calculation for Single Page Viewer
+  const previewAspectRatio = useMemo(() => {
+    if (!activeInspectItem) return "210 / 297";
+    const eff = {
+      ...options,
+      ...(activeInspectItem.customOptions || {}),
+    };
+    const isQuarter = activeInspectItem.rotation % 180 !== 0;
+    const effW = isQuarter ? activeInspectItem.height : activeInspectItem.width;
+    const effH = isQuarter ? activeInspectItem.width : activeInspectItem.height;
+
+    if (eff.pageSize === "Original") {
+      return `${effW} / ${effH}`;
     }
-  }, [activeInspectItem, activeItemOptions]);
+    let landscape = false;
+    if (eff.orientation === "Landscape") {
+      landscape = true;
+    } else if (eff.orientation === "Auto") {
+      landscape = effW > effH;
+    }
+    if (eff.pageSize === "Letter") {
+      return landscape ? "11 / 8.5" : "8.5 / 11";
+    }
+    return landscape ? "297 / 210" : "210 / 297";
+  }, [activeInspectItem, options]);
 
   return (
     <div className="folio-workspace images-workspace">
@@ -454,7 +420,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
 
       {/* Main Workspace Layout */}
       <div className="workspace-layout">
-        {/* Main Content Area (~75-80% desktop) */}
+        {/* Main Content Area */}
         <div className="workspace-main-col">
           {/* Main Title Area */}
           <div className="workspace-title-bar">
@@ -481,7 +447,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                   role="tab"
                   aria-selected={viewMode === "overview"}
                   className={`btn-toggle-tab ${viewMode === "overview" ? "active" : ""}`}
-                  onClick={() => setViewMode("overview")}
+                  onClick={() => documentSessionStore.setViewMode(TOOL_ID, "overview")}
                 >
                   Overview
                 </button>
@@ -490,7 +456,8 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                   role="tab"
                   aria-selected={viewMode === "single"}
                   className={`btn-toggle-tab ${viewMode === "single" ? "active" : ""}`}
-                  onClick={() => setViewMode("single")}
+                  onClick={() => documentSessionStore.setViewMode(TOOL_ID, "single")}
+                  disabled={sortedItems.length === 0}
                 >
                   Single page
                 </button>
@@ -519,34 +486,38 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                   <option value="natural-desc">Natural descending</option>
                   <option value="name-asc">Name (A → Z)</option>
                   <option value="name-desc">Name (Z → A)</option>
-                  <option value="date-newest">Date newest</option>
-                  <option value="date-oldest">Date oldest</option>
+                  <option value="date-newest">Newest first</option>
+                  <option value="date-oldest">Oldest first</option>
+                  <option value="manual">Manual arrangement</option>
                 </select>
               </div>
 
               {/* Jump to page */}
-              {sortedItems.length > 0 && (
+              {sortedItems.length > 5 && (
                 <form onSubmit={handleJumpPage} className="jump-page-form desktop-only">
-                  <span className="jump-label">Jump to page:</span>
+                  <span>Jump to:</span>
                   <input
-                    type="text"
+                    type="number"
+                    min={1}
+                    max={sortedItems.length}
                     value={jumpPageInput}
                     onChange={(e) => setJumpPageInput(e.target.value)}
                     className="jump-input"
                     aria-label="Jump to page number"
                   />
-                  <span className="jump-total">of {sortedItems.length}</span>
+                  <span>of {sortedItems.length}</span>
                 </form>
               )}
             </div>
           </div>
 
-          {/* Mobile Secondary Action Row */}
+          {/* Mobile Quick Action Bar (Add & Sort) */}
           <div className="mobile-action-bar mobile-only">
             <button
               type="button"
               className="btn-mobile-add"
               onClick={() => fileInputRef.current?.click()}
+              disabled={isProcessing}
             >
               + Add
             </button>
@@ -557,44 +528,53 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                 className="select-mobile-sort"
                 aria-label="Sort Order"
               >
-                <option value="natural-asc">Sort: Natural ▼</option>
-                <option value="name-asc">Sort: Name (A-Z) ▼</option>
-                <option value="date-newest">Sort: Date newest ▼</option>
+                <option value="natural-asc">Sort: Natural</option>
+                <option value="natural-desc">Sort: Natural desc</option>
+                <option value="name-asc">Sort: Name (A-Z)</option>
+                <option value="name-desc">Sort: Name (Z-A)</option>
+                <option value="date-newest">Sort: Newest</option>
+                <option value="date-oldest">Sort: Oldest</option>
+                <option value="manual">Sort: Manual</option>
               </select>
             </div>
           </div>
 
-          {/* Mobile Quick Download Banner */}
-          {result && (
-            <div className={`mobile-result-banner mobile-only ${result.isOutdated ? "outdated" : ""}`}>
-              <div className="mobile-result-info">
-                <span className="result-check">✓</span>
-                <div>
-                  <strong>{result.isOutdated ? "PDF outdated" : "PDF Ready!"}</strong>
-                  <p>{result.filename} ({(result.sizeBytes / (1024 * 1024)).toFixed(2)} MB)</p>
-                </div>
-              </div>
+          {/* Error Message Alert */}
+          {errorMessage && (
+            <div className="workspace-error-banner" role="alert">
+              <span>{errorMessage}</span>
               <button
                 type="button"
-                className="btn-mobile-download-action"
-                onClick={handleDownload}
+                className="btn-dismiss-error"
+                onClick={() => setErrorMessage("")}
               >
-                Download
+                ✕
               </button>
             </div>
           )}
 
-          {/* Selection Action Bar (when pages selected) */}
-          {selectedIds.size > 0 && (
-            <div className="selection-action-bar" role="region" aria-label="Selection Actions">
-              <div className="selection-count">
-                <strong>{selectedIds.size}</strong> selected
-              </div>
+          {/* Undo Toast */}
+          {undoStack && (
+            <div className="undo-toast-banner" role="status">
+              <span>{undoMessage}</span>
+              <button type="button" className="btn-undo-action" onClick={handleUndo}>
+                Undo
+              </button>
+            </div>
+          )}
+
+          {/* Batch Selection Action Bar */}
+          {selectedIds.size > 0 && viewMode === "overview" && (
+            <div className="selection-action-bar" role="region" aria-label="Selected pages actions">
+              <span className="selection-count">
+                <strong>{selectedIds.size}</strong> of {sortedItems.length} selected
+              </span>
               <div className="selection-buttons">
                 <button
                   type="button"
                   className="btn-action-inline"
                   onClick={handleRotateSelected}
+                  title="Rotate selected 90°"
                 >
                   <RotateIcon className="btn-action-icon" />
                   <span>Rotate</span>
@@ -602,7 +582,24 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                 <button
                   type="button"
                   className="btn-action-inline"
+                  onClick={handleMoveSelectedEarlier}
+                  title="Move selected earlier in document order"
+                >
+                  <span>← Earlier</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn-action-inline"
+                  onClick={handleMoveSelectedLater}
+                  title="Move selected later in document order"
+                >
+                  <span>Later →</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn-action-inline btn-danger"
                   onClick={handleRemoveSelected}
+                  title="Remove selected pages"
                 >
                   <TrashIcon className="btn-action-icon" />
                   <span>Remove</span>
@@ -610,9 +607,9 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                 <button
                   type="button"
                   className="btn-action-text"
-                  onClick={handleClearSelection}
+                  onClick={handleSelectAll}
                 >
-                  Clear selection
+                  {selectedIds.size === sortedItems.length ? "Deselect all" : "Select all"}
                 </button>
               </div>
             </div>
@@ -622,101 +619,48 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
           {viewMode === "overview" && (
             <div className="overview-container">
               {sortedItems.length === 0 ? (
-                <div
-                  className="empty-dropzone"
-                  onClick={() => fileInputRef.current?.click()}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    if (e.dataTransfer.files) handleAddFiles(e.dataTransfer.files);
-                  }}
-                >
-                  <div className="dropzone-art">
-                    <PdfDocIcon className="dropzone-icon" />
+                <div className="empty-dropzone">
+                  <div className="dropzone-illustration">
+                    <PdfDocIcon className="empty-icon-svg" />
                   </div>
-                  <h3>No images loaded</h3>
-                  <p>Drag and drop images here, or click to browse files.</p>
+                  <h3>No images added yet</h3>
+                  <p className="empty-hint">
+                    Add JPG, PNG, or WebP images to convert them into a professional PDF.
+                  </p>
                   <button
                     type="button"
-                    className="btn-load-samples"
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      setIsLoadingSamples(true);
-                      const sampleItems = await loadSampleSet(20);
-                      setItems(sampleItems);
-                      setIsLoadingSamples(false);
-                    }}
+                    className="btn-primary-action"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    Select Images from Device
+                  </button>
+                  <div className="empty-divider">or</div>
+                  <button
+                    type="button"
+                    className="btn-sample-load"
+                    onClick={handleLoadSamples}
+                    disabled={isLoadingSamples}
                   >
                     {isLoadingSamples ? "Loading samples…" : "Load 20 Travel Photos Sample"}
                   </button>
                 </div>
               ) : (
                 <div className="page-grid" role="list" aria-label="Document Pages">
-                  {sortedItems.map((item, idx) => {
-                    const isSelected = selectedIds.has(item.id);
-                    const pageNumStr = String(idx + 1).padStart(2, "0");
-
-                    return (
-                      <div
-                        id={`page-card-${item.id}`}
-                        key={item.id}
-                        role="listitem"
-                        className={`page-card ${isSelected ? "selected" : ""} ${
-                          activeInspectId === item.id ? "active-inspect" : ""
-                        }`}
-                        onClick={() => {
-                          setActiveInspectId(item.id);
-                        }}
-                        onDoubleClick={() => {
-                          setActiveInspectId(item.id);
-                          setViewMode("single");
-                        }}
-                      >
-                        {/* Selection check circle */}
-                        <button
-                          type="button"
-                          className={`selection-check-circle ${isSelected ? "checked" : ""}`}
-                          onClick={(e) => toggleSelection(item.id, e)}
-                          aria-label={`Select page ${pageNumStr}`}
-                        >
-                          {isSelected && <CheckIcon className="check-svg" />}
-                        </button>
-
-                        {/* Thumbnail image */}
-                        <div className="card-thumb-wrap">
-                          <img
-                            src={item.objectUrl}
-                            alt={item.name}
-                            className="card-thumb-img"
-                            style={{
-                              transform: `rotate(${item.rotation}deg)`,
-                            }}
-                            loading="lazy"
-                          />
-                        </div>
-
-                        {/* Card bottom metadata: 01 filename.jpg */}
-                        <div className="card-meta">
-                          <span className="card-page-num">{pageNumStr}</span>
-                          <span className="card-filename" title={item.name}>
-                            {item.name}
-                          </span>
-                          {item.customOptions && Object.keys(item.customOptions).length > 0 && (
-                            <span
-                              className="card-custom-badge"
-                              title="Custom per-page settings applied"
-                            >
-                              {item.customOptions.orientation
-                                ? item.customOptions.orientation === "Landscape"
-                                  ? "Land."
-                                  : "Port."
-                                : item.customOptions.pageSize || "Custom"}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {sortedItems.map((item, idx) => (
+                    <ThumbnailSheet
+                      key={item.id}
+                      item={item}
+                      pageIndex={idx}
+                      options={options}
+                      isSelected={selectedIds.has(item.id)}
+                      isActiveInspect={activeInspectId === item.id}
+                      onToggleSelect={(id, e) => toggleSelection(id, e)}
+                      onInspect={(id) => {
+                        documentSessionStore.setActiveInspectId(TOOL_ID, id);
+                      }}
+                      onRotate={(id, e) => handleRotateSingle(id, e)}
+                    />
+                  ))}
                 </div>
               )}
 
@@ -727,7 +671,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                     Showing pages 1 – {sortedItems.length} of {sortedItems.length}
                   </span>
                   <span className="grid-status-hint desktop-only">
-                    Click a page to inspect
+                    Click a page to inspect or double-click for full page view
                   </span>
                 </div>
               )}
@@ -745,8 +689,13 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                     <button
                       key={item.id}
                       type="button"
-                      className={`thumb-strip-item ${item.id === activeInspectItem.id ? "active" : ""}`}
-                      onClick={() => setActiveInspectId(item.id)}
+                      className={`thumb-strip-item ${
+                        item.id === activeInspectItem.id ? "active" : ""
+                      }`}
+                      onClick={() =>
+                        documentSessionStore.setActiveInspectId(TOOL_ID, item.id)
+                      }
+                      title={`Page ${idx + 1}: ${item.name}`}
                     >
                       <span className="thumb-strip-num">{idx + 1}</span>
                       <img
@@ -769,7 +718,10 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                     disabled={activeInspectIndex === 0}
                     onClick={() => {
                       if (activeInspectIndex > 0) {
-                        setActiveInspectId(sortedItems[activeInspectIndex - 1].id);
+                        documentSessionStore.setActiveInspectId(
+                          TOOL_ID,
+                          sortedItems[activeInspectIndex - 1].id
+                        );
                       }
                     }}
                   >
@@ -784,7 +736,10 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                     disabled={activeInspectIndex === sortedItems.length - 1}
                     onClick={() => {
                       if (activeInspectIndex < sortedItems.length - 1) {
-                        setActiveInspectId(sortedItems[activeInspectIndex + 1].id);
+                        documentSessionStore.setActiveInspectId(
+                          TOOL_ID,
+                          sortedItems[activeInspectIndex + 1].id
+                        );
                       }
                     }}
                   >
@@ -812,30 +767,60 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                       style={{
                         width: "100%",
                         height: "100%",
-                        objectFit: activeItemOptions.fit === "Cover" ? "cover" : "contain",
+                        objectFit:
+                          activeItemOptions.fit === "Cover" ? "cover" : "contain",
                         transform: `rotate(${activeInspectItem.rotation}deg)`,
                       }}
                     />
                   </div>
                 </div>
 
-                {/* Zoom control */}
+                {/* Zoom Controls */}
                 <div className="single-zoom-bar">
                   <span>Zoom:</span>
-                  <button type="button" onClick={() => setSingleZoom((z) => Math.max(0.6, z - 0.1))}>−</button>
-                  <span>{Math.round(singleZoom * 100)}%</span>
-                  <button type="button" onClick={() => setSingleZoom((z) => Math.min(1.5, z + 0.1))}>+</button>
-                  <button type="button" onClick={() => setSingleZoom(1)}>Reset</button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSingleZoom((z) => Math.max(0.5, Number((z - 0.15).toFixed(2))))
+                    }
+                    title="Zoom out"
+                  >
+                    −
+                  </button>
+                  <span className="zoom-value-label">
+                    {Math.round(singleZoom * 100)}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSingleZoom((z) => Math.min(2.5, Number((z + 0.15).toFixed(2))))
+                    }
+                    title="Zoom in"
+                  >
+                    +
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSingleZoom(1);
+                      setFitMode("page");
+                    }}
+                    title="Reset to 100%"
+                  >
+                    Fit Page
+                  </button>
                 </div>
               </div>
             </div>
           )}
         </div>
 
-        {/* Right Sidebar — Document Settings (~20-25% desktop) */}
+        {/* Right Settings Sidebar (Desktop & Mobile Drawer) */}
         <aside
-          className={`workspace-sidebar ${mobileSettingsOpen ? "mobile-drawer-open" : ""}`}
-          aria-label="Document Settings"
+          className={`workspace-sidebar ${
+            mobileSettingsOpen ? "mobile-drawer-open" : ""
+          }`}
+          aria-label="Document settings"
         >
           {/* Mobile Drawer Header */}
           <div className="sidebar-mobile-header mobile-only">
@@ -844,178 +829,186 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
               type="button"
               className="btn-close-drawer"
               onClick={() => setMobileSettingsOpen(false)}
+              aria-label="Close settings"
             >
               ✕
             </button>
           </div>
 
-          <h2 className="sidebar-heading desktop-only">Document settings</h2>
+          <div className="sidebar-title-row desktop-only">
+            <h2>Document settings</h2>
+          </div>
 
-          {/* Scope Toggle: [ Apply to all pages ] [ Custom per page ] */}
-          <div className="scope-toggle-wrap">
+          {/* Scope Selector: Apply to all pages vs Custom per page */}
+          <div className="setting-scope-toggle" role="tablist">
             <button
               type="button"
-              className={`scope-toggle-btn ${scopeMode === "all" ? "active" : ""}`}
+              role="tab"
+              aria-selected={scopeMode === "all"}
+              className={`btn-scope-tab ${scopeMode === "all" ? "active" : ""}`}
               onClick={() => setScopeMode("all")}
             >
               Apply to all pages
             </button>
             <button
               type="button"
-              className={`scope-toggle-btn ${scopeMode === "custom" ? "active" : ""}`}
+              role="tab"
+              aria-selected={scopeMode === "custom"}
+              className={`btn-scope-tab ${scopeMode === "custom" ? "active" : ""}`}
               onClick={() => setScopeMode("custom")}
+              disabled={sortedItems.length === 0}
             >
               Custom per page
             </button>
           </div>
 
-          {scopeMode === "custom" && (
-            <div className="custom-scope-box">
-              <div className="custom-scope-header">
-                <span className="custom-scope-label">
-                  {targetIds.length > 1
-                    ? `Editing ${targetIds.length} selected pages`
-                    : activeTargetItem
-                    ? `Editing Page ${
-                        Math.max(
-                          0,
-                          sortedItems.findIndex((it) => it.id === activeTargetItem.id)
-                        ) + 1
-                      }: ${activeTargetItem.name}`
-                    : "Click a page to customize"}
-                </span>
-                {activeTargetItem?.customOptions &&
-                  Object.keys(activeTargetItem.customOptions).length > 0 && (
-                    <button
-                      type="button"
-                      className="btn-reset-custom"
-                      onClick={() => handleResetCustomOptions(targetIds)}
-                      title="Reset this page to document defaults"
-                    >
-                      Reset to default
-                    </button>
-                  )}
-              </div>
-              <p className="custom-scope-hint">
-                Settings below apply only to this single page.
-              </p>
+          {/* Scope notice banner */}
+          {scopeMode === "custom" && activeTargetItem && (
+            <div className="scope-notice-banner">
+              <span className="scope-notice-label">
+                Editing: Page {activeInspectIndex + 1} ({activeTargetItem.name})
+              </span>
+              {activeTargetItem.customOptions && (
+                <button
+                  type="button"
+                  className="btn-reset-scope"
+                  onClick={() => handleResetCustomOptions([activeTargetItem.id])}
+                >
+                  Reset to default
+                </button>
+              )}
             </div>
           )}
 
-          {/* Setting 1: Page Orientation */}
+          {/* Setting: Page orientation */}
           <div className="setting-group">
             <label className="setting-label">Page orientation</label>
             <div className="segmented-control">
               <button
                 type="button"
-                className={`segment-btn ${currentDisplayOptions.orientation === "Portrait" ? "active" : ""}`}
+                className={`segment-btn ${
+                  currentDisplayOptions.orientation === "Portrait" ? "active" : ""
+                }`}
                 onClick={() => handleOptionChange("orientation", "Portrait")}
               >
                 Portrait
               </button>
               <button
                 type="button"
-                className={`segment-btn ${currentDisplayOptions.orientation === "Landscape" ? "active" : ""}`}
+                className={`segment-btn ${
+                  currentDisplayOptions.orientation === "Landscape" ? "active" : ""
+                }`}
                 onClick={() => handleOptionChange("orientation", "Landscape")}
               >
                 Landscape
               </button>
+              <button
+                type="button"
+                className={`segment-btn ${
+                  currentDisplayOptions.orientation === "Auto" ? "active" : ""
+                }`}
+                onClick={() => handleOptionChange("orientation", "Auto")}
+              >
+                Auto
+              </button>
             </div>
           </div>
 
-          {/* Setting 2: Page Size */}
+          {/* Setting: Page size */}
           <div className="setting-group">
             <label className="setting-label">Page size</label>
             <select
               className="setting-select"
               value={currentDisplayOptions.pageSize}
-              onChange={(e) => handleOptionChange("pageSize", e.target.value as any)}
+              onChange={(e) =>
+                handleOptionChange(
+                  "pageSize",
+                  e.target.value as PdfOptions["pageSize"]
+                )
+              }
             >
               <option value="A4">A4 (210 × 297 mm)</option>
-              <option value="Letter">Letter (8.5 × 11 in)</option>
-              <option value="Original">Image size</option>
+              <option value="Letter">US Letter (8.5 × 11 in)</option>
+              <option value="Original">Original image dimensions</option>
             </select>
           </div>
 
-          {/* Setting 3: Margins */}
+          {/* Setting: Margins */}
           <div className="setting-group">
             <label className="setting-label">Margins</label>
             <div className="segmented-control">
               <button
                 type="button"
-                className={`segment-btn ${currentDisplayOptions.marginPreset === "None" ? "active" : ""}`}
-                onClick={() => handleOptionChange("marginPreset", "None", { marginMm: 0 })}
+                className={`segment-btn ${
+                  currentDisplayOptions.marginPreset === "None" ? "active" : ""
+                }`}
+                onClick={() =>
+                  handleOptionChange("marginPreset", "None", { marginMm: 0 })
+                }
               >
                 None
               </button>
               <button
                 type="button"
-                className={`segment-btn ${currentDisplayOptions.marginPreset === "Small" ? "active" : ""}`}
-                onClick={() => handleOptionChange("marginPreset", "Small", { marginMm: 12 })}
+                className={`segment-btn ${
+                  currentDisplayOptions.marginPreset === "Small" ? "active" : ""
+                }`}
+                onClick={() =>
+                  handleOptionChange("marginPreset", "Small", { marginMm: 12 })
+                }
               >
                 Small
               </button>
               <button
                 type="button"
-                className={`segment-btn ${currentDisplayOptions.marginPreset === "Custom" ? "active" : ""}`}
+                className={`segment-btn ${
+                  currentDisplayOptions.marginPreset === "Custom" ? "active" : ""
+                }`}
                 onClick={() => handleOptionChange("marginPreset", "Custom")}
               >
                 Custom
               </button>
             </div>
-
-            {currentDisplayOptions.marginPreset !== "None" && (
-              <div className="margin-size-row">
-                <span className="margin-size-label">Margin size</span>
-                <div className="margin-input-wrap">
-                  <input
-                    type="number"
-                    min="0"
-                    max="60"
-                    value={currentDisplayOptions.marginMm}
-                    onChange={(e) => {
-                      const val = Math.max(0, parseInt(e.target.value, 10) || 0);
-                      handleOptionChange("marginMm", val);
-                    }}
-                    className="margin-input"
-                  />
-                  <span className="margin-unit">mm</span>
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* Setting 4: Fit image to page */}
+          {/* Setting: Fit image to page */}
           <div className="setting-group">
             <label className="setting-label">Fit image to page</label>
             <select
               className="setting-select"
               value={currentDisplayOptions.fit}
-              onChange={(e) => handleOptionChange("fit", e.target.value as any)}
+              onChange={(e) =>
+                handleOptionChange(
+                  "fit",
+                  e.target.value as PdfOptions["fit"]
+                )
+              }
             >
-              <option value="Contain">Contain</option>
-              <option value="Cover">Cover</option>
+              <option value="Contain">Contain (show entire image with border)</option>
+              <option value="Cover">Cover (fill page edge-to-edge)</option>
+              <option value="Original">Original 1:1 scale</option>
             </select>
           </div>
 
-          {/* Setting 5: Image Quality */}
+          {/* Setting: Image quality */}
           <div className="setting-group">
             <label className="setting-label">Image quality</label>
             <select
               className="setting-select"
               value={options.profile}
-              onChange={(e) => {
-                setOptions((prev) => ({ ...prev, profile: e.target.value as any }));
-                markOutdated();
-              }}
+              onChange={(e) =>
+                documentSessionStore.setOptions(TOOL_ID, {
+                  profile: e.target.value as PdfOptions["profile"],
+                })
+              }
             >
-              <option value="Screen/Mobile">Screen / mobile (good quality)</option>
-              <option value="Print">Print (high quality)</option>
-              <option value="Original">Original (uncompressed)</option>
+              <option value="Screen/Mobile">Screen / Mobile (good quality, smaller size)</option>
+              <option value="Print">Print (high resolution, 300 DPI)</option>
+              <option value="Original">Original uncompressed bytes</option>
             </select>
           </div>
 
-          {/* Setting 6: Filename */}
+          {/* Setting: Filename */}
           <div className="setting-group">
             <label className="setting-label">Filename</label>
             <input
@@ -1023,8 +1016,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
               className="setting-input"
               value={options.filename}
               onChange={(e) => {
-                setOptions((prev) => ({ ...prev, filename: e.target.value }));
-                markOutdated();
+                documentSessionStore.setOptions(TOOL_ID, { filename: e.target.value });
               }}
             />
           </div>
@@ -1063,6 +1055,13 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
               <span className="progress-status-text">
                 {progress.currentFilename} ({progress.percent}%)
               </span>
+              <button
+                type="button"
+                className="btn-cancel-processing"
+                onClick={handleCancelGeneration}
+              >
+                Cancel
+              </button>
             </div>
           )}
 
@@ -1088,36 +1087,33 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
         </aside>
       </div>
 
-      {/* Mobile Sticky Bottom Action Bar */}
+      {/* Mobile Sticky Bottom Action Bar (Sleek single-row layout with min 44x44px touch targets) */}
       <div className="mobile-bottom-bar mobile-only">
-        <div className="mobile-bottom-actions-row">
-          <button
-            type="button"
-            className="btn-bottom-sub"
-            onClick={handleSelectAll}
-          >
-            <span className="btn-sub-icon">≡</span>
-            <span>{selectedIds.size > 0 ? "Clear selection" : "Select pages"}</span>
-          </button>
-          <button
-            type="button"
-            className="btn-bottom-sub"
-            onClick={() => setMobileSettingsOpen(true)}
-          >
-            <SettingsIcon className="btn-sub-icon" />
-            <span>Settings</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          className="btn-bottom-sub"
+          onClick={() => setMobileSettingsOpen(true)}
+          aria-label="Open document settings"
+          title="Document settings"
+        >
+          <SettingsIcon className="btn-sub-icon" />
+        </button>
 
         <button
           type="button"
           className="btn-mobile-create-pdf"
-          onClick={handleGeneratePdf}
+          onClick={result && !result.isOutdated ? handleDownload : handleGeneratePdf}
           disabled={isProcessing || sortedItems.length === 0}
         >
           <PdfDocIcon className="btn-pdf-icon" />
           <span>
-            {isProcessing ? "Creating…" : result && result.isOutdated ? "Create updated PDF" : "Create PDF"}
+            {isProcessing
+              ? "Creating…"
+              : result && !result.isOutdated
+              ? "Download PDF"
+              : result && result.isOutdated
+              ? "Create updated PDF"
+              : "Create PDF"}
           </span>
         </button>
       </div>

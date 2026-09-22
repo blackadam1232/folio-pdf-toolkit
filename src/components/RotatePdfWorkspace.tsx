@@ -346,6 +346,32 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
           </aside>
         </div>
       )}
+
+      {/* Mobile Sticky Bottom Action Bar */}
+      {file && (
+        <div className="mobile-bottom-bar mobile-only">
+          <button
+            type="button"
+            className="btn-mobile-create-pdf"
+            onClick={downloadUrl ? () => {
+              const a = document.createElement("a");
+              a.href = downloadUrl;
+              a.download = downloadName;
+              a.click();
+            } : handleRotate}
+            disabled={isProcessing}
+          >
+            <RotateIcon className="btn-pdf-icon" />
+            <span>
+              {isProcessing
+                ? "Rotating…"
+                : downloadUrl
+                ? "Download Rotated PDF"
+                : `Rotate (${angle}°)`}
+            </span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

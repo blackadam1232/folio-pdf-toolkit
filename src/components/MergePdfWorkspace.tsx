@@ -265,6 +265,27 @@ export function MergePdfWorkspace({ onBackToHome }: MergePdfWorkspaceProps) {
           </aside>
         </div>
       )}
+
+      {/* Mobile Sticky Bottom Action Bar */}
+      {files.length > 0 && (
+        <div className="mobile-bottom-bar mobile-only">
+          <button
+            type="button"
+            className="btn-mobile-create-pdf"
+            onClick={mergedBlobUrl ? handleDownload : handleMerge}
+            disabled={isProcessing || files.length < 2}
+          >
+            <MergeIcon className="btn-pdf-icon" />
+            <span>
+              {isProcessing
+                ? "Merging…"
+                : mergedBlobUrl
+                ? "Download Merged PDF"
+                : `Merge ${files.length} PDFs`}
+            </span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
