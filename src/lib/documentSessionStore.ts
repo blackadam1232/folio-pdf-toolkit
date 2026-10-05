@@ -1,9 +1,11 @@
 import { useSyncExternalStore } from "react";
 import {
   ConversionResult,
+  CropRect,
   GenerationProgress,
   ImageItem,
   PdfOptions,
+  PerPageOptions,
 } from "../types";
 import { generatePdf, inspectImageFile } from "./pdfEngine";
 import { sortImageItems } from "./sort";
@@ -195,6 +197,182 @@ export const documentSessionStore = {
       return it;
     });
     this.setItems(toolId, newItems);
+  },
+
+  updateItemEdits(
+    toolId: string,
+    id: string,
+    edits: { rotation?: number; flipH?: boolean; flipV?: boolean; crop?: CropRect }
+  ) {
+    const cur = this.getToolState(toolId);
+    const newItems = cur.items.map((it) => {
+      if (it.id === id) {
+        const updated = {
+          ...it,
+          rotation: edits.rotation !== undefined ? edits.rotation : it.rotation,
+          flipH: edits.flipH !== undefined ? edits.flipH : it.flipH,
+          flipV: edits.flipV !== undefined ? edits.flipV : it.flipV,
+          crop: edits.crop !== undefined ? edits.crop : it.crop,
+        };
+        if (edits.crop === undefined && "crop" in edits) {
+          delete updated.crop;
+        }
+        return updated;
+      }
+      return it;
+    });
+    this.setItems(toolId, newItems);
+  },
+
+  resetItemEdits(toolId: string, id: string) {
+    const cur = this.getToolState(toolId);
+    const newItems = cur.items.map((it) => {
+      if (it.id === id) {
+        const copy = { ...it, rotation: 0, flipH: false, flipV: false };
+        delete copy.crop;
+        return copy;
+      }
+      return it;
+    });
+    this.setItems(toolId, newItems);
+  },
+
+  updateItemCustomOption<K extends keyof PerPageOptions>(
+    toolId: string,
+    id: string,
+    key: K,
+    value: PerPageOptions[K],
+    extraUpdates?: Partial<PerPageOptions>
+  ) {
+    const cur = this.getToolState(toolId);
+    const newItems = cur.items.map((it) => {
+      if (it.id === id) {
+        return {
+          ...it,
+          customOptions: {
+            ...(it.customOptions || {}),
+            [key]: value,
+            ...(extraUpdates || {}),
+          },
+        };
+      }
+      return it;
+    });
+    this.setItems(toolId, newItems);
+  },
+
+  resetItemCustomOptionProperty(toolId: string, id: string, key: keyof PerPageOptions) {
+    const cur = this.getToolState(toolId);
+    const newItems = cur.items.map((it) => {
+      if (it.id === id && it.customOptions) {
+        const updated = { ...it.customOptions };
+        delete updated[key];
+        if (key === "marginPreset") {
+          delete updated.marginMm;
+          delete updated.customMargins;
+        }
+        if (Object.keys(updated).length === 0) {
+          const itemCopy = { ...it };
+          delete itemCopy.customOptions;
+          return itemCopy;
+        }
+        return { ...it, customOptions: updated };
+      }
+      return it;
+    });
+    this.setItems(toolId, newItems);
+  },
+
+  resetItemCustomOptions(toolId: string, id: string) {
+    const cur = this.getToolState(toolId);
+    const newItems = cur.items.map((it) => {
+      if (it.id === id) {
+        const itemCopy = { ...it };
+        delete itemCopy.customOptions;
+        return itemCopy;
+      }
+      return it;
+    });
+    this.setItems(toolId, newItems);
+  },
+
+  applyItemSettingsToAll(toolId: string, id: string) {
+    const cur = this.getToolState(toolId);
+    const targetItem = cur.items.find((it) => it.id === id);
+    if (!targetItem) return;
+
+    const effectiveSettings: Partial<PdfOptions> = {
+      pageSize: targetItem.customOptions?.pageSize || cur.options.pageSize,
+      orientation: targetItem.customOptions?.orientation || cur.options.orientation,
+      fit: targetItem.customOptions?.fit || cur.options.fit,
+      profile: targetItem.customOptions?.profile || cur.options.profile,
+      marginPreset: targetItem.customOptions?.marginPreset || cur.options.marginPreset,
+      marginMm:
+        targetItem.customOptions?.marginMm !== undefined
+          ? targetItem.customOptions.marginMm
+          : cur.options.marginMm,
+      customMargins: targetItem.customOptions?.customMargins
+        ? [...targetItem.customOptions.customMargins]
+        : [...cur.options.customMargins],
+    };
+
+    // Update shared options, and remove customOptions from all items
+    const newItems = cur.items.map((it) => {
+      const copy = { ...it };
+      delete copy.customOptions;
+      return copy;
+    });
+
+    sessions[toolId] = {
+      ...cur,
+      options: { ...cur.options, ...effectiveSettings },
+      items: newItems,
+      isOutdated: cur.result !== null,
+    };
+    emit();
+  },
+
+  duplicateItem(toolId: string, id: string): string {
+    const cur = this.getToolState(toolId);
+    const index = cur.items.findIndex((it) => it.id === id);
+    if (index === -1) return "";
+
+    const orig = cur.items[index];
+    const newId = `img_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const cloned: ImageItem = {
+      ...orig,
+      id: newId,
+      name: orig.name.includes(" (Copy)")
+        ? orig.name
+        : orig.name.replace(/(\.[^.]+)$/, " (Copy)$1"),
+      crop: orig.crop ? { ...orig.crop } : undefined,
+      customOptions: orig.customOptions
+        ? {
+            ...orig.customOptions,
+            customMargins: orig.customOptions.customMargins
+              ? [...orig.customOptions.customMargins]
+              : undefined,
+          }
+        : undefined,
+    };
+
+    const newItems = [...cur.items];
+    newItems.splice(index + 1, 0, cloned);
+
+    let newManualOrder = cur.options.manualOrder;
+    if (cur.options.sort === "manual") {
+      newManualOrder = newItems.map((it) => it.id);
+    }
+
+    sessions[toolId] = {
+      ...cur,
+      items: newItems,
+      activeInspectId: newId,
+      options: { ...cur.options, manualOrder: newManualOrder },
+      isOutdated: cur.result !== null,
+    };
+    emit();
+    return newId;
   },
 
   removeItem(toolId: string, id: string) {

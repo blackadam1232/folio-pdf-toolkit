@@ -8,9 +8,9 @@ import {
 import { calculateGeometry } from "./layout";
 import { sortImageItems } from "./sort";
 
-// Safety limits
-export const MAX_FILES_LIMIT = 150;
-export const MAX_TOTAL_BYTES_LIMIT = 300 * 1024 * 1024; // 300 MB
+// Safety limits (supports batches of 200+ images seamlessly)
+export const MAX_FILES_LIMIT = 500;
+export const MAX_TOTAL_BYTES_LIMIT = 1024 * 1024 * 1024; // 1 GB (1024 MB)
 export const MAX_PIXELS_LIMIT = 40_000_000; // 40 Megapixels
 
 export const SUPPORTED_MIME_TYPES = new Set([
@@ -104,6 +104,7 @@ export async function processImageForPdf(
     imageWidth: item.width,
     imageHeight: item.height,
     rotation: item.rotation,
+    crop: item.crop,
     options,
   })
 ): Promise<{ bytes: Uint8Array; format: "jpeg" | "png" }> {
@@ -116,36 +117,29 @@ export async function processImageForPdf(
         const turnedWidth = isQuarterTurn ? img.naturalHeight : img.naturalWidth;
         const turnedHeight = isQuarterTurn ? img.naturalWidth : img.naturalHeight;
 
-        // Step 1: Handle rotation on an intermediate canvas if rotated
-        let rotatedCanvas: HTMLCanvasElement;
+        // Step 1: Handle rotation & flips on an intermediate canvas
+        const transformedCanvas = document.createElement("canvas");
+        transformedCanvas.width = turnedWidth;
+        transformedCanvas.height = turnedHeight;
+        const ctx = transformedCanvas.getContext("2d");
+        if (!ctx) throw new Error("Could not create canvas 2D rendering context.");
+
+        ctx.translate(turnedWidth / 2, turnedHeight / 2);
+        if (item.flipH) ctx.scale(-1, 1);
+        if (item.flipV) ctx.scale(1, -1);
         if (rotation !== 0) {
-          rotatedCanvas = document.createElement("canvas");
-          rotatedCanvas.width = turnedWidth;
-          rotatedCanvas.height = turnedHeight;
-          const ctx = rotatedCanvas.getContext("2d");
-          if (!ctx) throw new Error("Could not create canvas 2D rendering context.");
-
-          ctx.translate(turnedWidth / 2, turnedHeight / 2);
           ctx.rotate((rotation * Math.PI) / 180);
-          ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
-        } else {
-          // If no rotation, use source directly or offscreen
-          rotatedCanvas = document.createElement("canvas");
-          rotatedCanvas.width = turnedWidth;
-          rotatedCanvas.height = turnedHeight;
-          const ctx = rotatedCanvas.getContext("2d");
-          if (!ctx) throw new Error("Could not create canvas 2D rendering context.");
-          ctx.drawImage(img, 0, 0);
         }
+        ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
 
-        // Step 2: Handle Crop (Cover fit)
-        let croppedSource: CanvasImageSource = rotatedCanvas;
+        // Step 2: Handle Crop (Manual crop and/or Cover fit)
+        let croppedSource: CanvasImageSource = transformedCanvas;
         let cropSx = 0;
         let cropSy = 0;
         let cropWidth = turnedWidth;
         let cropHeight = turnedHeight;
 
-        if (options.fit === "Cover" && geometry.cropRect) {
+        if (geometry.cropRect) {
           cropSx = geometry.cropRect.sx;
           cropSy = geometry.cropRect.sy;
           cropWidth = geometry.cropRect.sWidth;
@@ -315,6 +309,7 @@ export async function generatePdf(
       imageWidth: item.width,
       imageHeight: item.height,
       rotation: item.rotation,
+      crop: item.crop,
       options: itemOptions,
     });
 

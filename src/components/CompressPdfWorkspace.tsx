@@ -3,10 +3,11 @@ import { CompressionPreset, CompressionResult } from "../types";
 import {
   useCompressionSession,
   compressionSessionStore,
+  CompressionItem,
 } from "../lib/compressionSessionStore";
 import { useRouter, router } from "../lib/router";
 import { mapStrengthToSettings } from "../lib/compressEngine";
-import { CompressIcon, PdfDocIcon, CheckIcon } from "./Icons";
+import { CompressIcon, PdfDocIcon, TrashIcon, PlusIcon, CheckIcon } from "./Icons";
 import { ExpandedPreviewModal } from "./ExpandedPreviewModal";
 
 interface CompressPdfWorkspaceProps {
@@ -17,6 +18,8 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
   const route = useRouter();
   const session = useCompressionSession();
   const {
+    items,
+    activeItemId,
     file,
     fileInfo,
     preset,
@@ -27,12 +30,16 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
     isPreviewLoading,
     jobStatus,
     progress,
+    batchProgress,
     result,
+    results,
+    zipUrl,
     isOutdated,
     errorMessage,
   } = session;
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const addMoreInputRef = useRef<HTMLInputElement | null>(null);
   const expandBtnRef = useRef<HTMLButtonElement | null>(null);
   const [jumpPage, setJumpPage] = useState<string>("1");
 
@@ -41,12 +48,43 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
     setJumpPage(String(previewPage));
   }, [previewPage]);
 
-  // Handler for file selection
-  const handleSelectFile = async (selectedFile: File) => {
-    const success = await compressionSessionStore.setFile(selectedFile);
+  const formatBytes = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
+  // Handler for file selection (initial upload or replace)
+  const handleSelectFiles = async (fileList: FileList | File[], replace = true) => {
+    const success = await compressionSessionStore.addFiles(fileList, replace);
     if (success) {
       router.navigate({ toolId: "compress-pdf", stage: "editor" });
     }
+  };
+
+  // Handler for adding more files to the current batch
+  const handleAddMoreFiles = async (fileList: FileList | File[]) => {
+    await compressionSessionStore.addFiles(fileList, false);
+  };
+
+  // Handler for removing a file
+  const handleRemoveFile = (id: string) => {
+    compressionSessionStore.removeFile(id);
+    const updated = compressionSessionStore.getState();
+    if (!updated.items.length) {
+      router.navigate({ toolId: "compress-pdf", stage: "upload" });
+    }
+  };
+
+  // Handler for selecting an active file for preview
+  const handleSetActiveFile = (id: string) => {
+    compressionSessionStore.setActiveFile(id);
+  };
+
+  // Handler for clear all files
+  const handleClearAll = () => {
+    compressionSessionStore.reset();
+    router.navigate({ toolId: "compress-pdf", stage: "upload" });
   };
 
   // Handler for preset selection
@@ -65,14 +103,14 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
     compressionSessionStore.setSettings(val);
   };
 
-  // Handler for starting compression
+  // Handler for starting compression (single or batch)
   const handleStartCompression = () => {
-    if (!file || jobStatus === "processing") return;
+    if (!items.length || jobStatus === "processing") return;
 
     // Navigate to processing screen
     router.navigate({ toolId: "compress-pdf", stage: "processing" });
 
-    compressionSessionStore.startCompression(undefined, (completedResult) => {
+    compressionSessionStore.startCompression(undefined, () => {
       // If currently on processing route, replace history entry with result
       const currentRoute = router.getRoute();
       if (currentRoute.toolId === "compress-pdf" && currentRoute.stage === "processing") {
@@ -110,13 +148,41 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
     return mapStrengthToSettings(strength);
   }, [strength]);
 
-  const totalPages = fileInfo?.pageCount || 1;
+  const activePageCount = fileInfo?.pageCount || 1;
+
+  const totalPages = useMemo(() => {
+    return items.reduce((sum, it) => sum + it.pageCount, 0) || activePageCount;
+  }, [items, activePageCount]);
+
+  const totalOriginalBytes = useMemo(() => {
+    return (
+      items.reduce((sum, it) => sum + (it.result?.originalBytes || it.size), 0) ||
+      fileInfo?.size ||
+      0
+    );
+  }, [items, fileInfo]);
+
+  const totalOutputBytes = useMemo(() => {
+    return items.reduce(
+      (sum, it) => sum + (it.result ? it.result.outputBytes : it.size),
+      0
+    );
+  }, [items]);
+
+  const totalReduced = totalOutputBytes < totalOriginalBytes;
+  const totalPercentSaved = totalReduced
+    ? Number((((totalOriginalBytes - totalOutputBytes) / totalOriginalBytes) * 100).toFixed(1))
+    : 0;
+
+  const completedCount = useMemo(() => {
+    return Object.keys(results).length;
+  }, [results]);
 
   // Handle jump page submission
   const handleJumpSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const p = parseInt(jumpPage, 10);
-    if (!isNaN(p) && p >= 1 && p <= totalPages) {
+    if (!isNaN(p) && p >= 1 && p <= activePageCount) {
       compressionSessionStore.setPreviewPage(p);
     } else {
       setJumpPage(String(previewPage));
@@ -124,16 +190,21 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
   };
 
   // 1. RECOVERY VIEW: If user refreshed on editor/processing/result with no file in memory
-  if (!file && (route.stage === "editor" || route.stage === "processing" || route.stage === "result")) {
+  if (
+    !items.length &&
+    !file &&
+    (route.stage === "editor" || route.stage === "processing" || route.stage === "result")
+  ) {
     return (
       <div className="folio-workspace tool-generic-workspace compress-workspace">
         <input
           ref={fileInputRef}
           type="file"
+          multiple
           accept="application/pdf"
           style={{ display: "none" }}
           onChange={(e) => {
-            if (e.target.files?.[0]) handleSelectFile(e.target.files[0]);
+            if (e.target.files?.length) handleSelectFiles(e.target.files, true);
             e.target.value = "";
           }}
         />
@@ -156,7 +227,7 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
           <div className="dropzone-art">
             <CompressIcon className="dropzone-icon" />
           </div>
-          <h3>Select your PDF to continue</h3>
+          <h3>Select your PDF(s) to continue</h3>
           <p>
             Your previous browser session was reset or refreshed. Files are kept privately in temporary device memory.
           </p>
@@ -166,7 +237,7 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
               className="btn-primary-action"
               onClick={() => fileInputRef.current?.click()}
             >
-              Select PDF File
+              Select PDF File(s)
             </button>
             <button
               type="button"
@@ -182,16 +253,17 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
   }
 
   // 2. UPLOAD VIEW: No file loaded yet
-  if (!file || route.stage === "upload") {
+  if (!items.length || route.stage === "upload") {
     return (
       <div className="folio-workspace tool-generic-workspace compress-workspace">
         <input
           ref={fileInputRef}
           type="file"
+          multiple
           accept="application/pdf"
           style={{ display: "none" }}
           onChange={(e) => {
-            if (e.target.files?.[0]) handleSelectFile(e.target.files[0]);
+            if (e.target.files?.length) handleSelectFiles(e.target.files, true);
             e.target.value = "";
           }}
         />
@@ -209,7 +281,7 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
             <div>
               <h1 className="document-title">Compress PDF</h1>
               <p className="tool-header-subtitle">
-                Reduce file size while preserving text, vectors, and image clarity.
+                Reduce single or batch PDF file sizes while preserving text, vectors, and image clarity.
               </p>
             </div>
           </div>
@@ -234,20 +306,20 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
-            if (e.dataTransfer.files?.[0]) handleSelectFile(e.dataTransfer.files[0]);
+            if (e.dataTransfer.files?.length) handleSelectFiles(e.dataTransfer.files, true);
           }}
           role="button"
           tabIndex={0}
           onKeyDown={(e) => e.key === "Enter" && fileInputRef.current?.click()}
-          aria-label="Upload PDF file"
+          aria-label="Upload PDF files"
         >
           <div className="dropzone-art">
             <CompressIcon className="dropzone-icon" />
           </div>
-          <h3>Select a PDF to compress</h3>
-          <p>Drag and drop a PDF file here, or click to choose from your device.</p>
+          <h3>Select PDF file(s) to compress</h3>
+          <p>Drag and drop one or multiple PDF files here, or click to choose from your device.</p>
           <button type="button" className="btn-primary-action btn-choose-file">
-            Choose PDF File
+            Choose PDF File(s)
           </button>
         </div>
       </div>
@@ -256,6 +328,8 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
 
   // 3. PROCESSING STAGE: Dedicated progress screen
   if (route.stage === "processing") {
+    const isBatch = items.length > 1;
+
     return (
       <div className="folio-workspace tool-generic-workspace compress-workspace processing-workspace">
         <div className="tool-workspace-header">
@@ -269,9 +343,13 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
               ← Back to settings
             </button>
             <div>
-              <h1 className="document-title">Compressing PDF…</h1>
+              <h1 className="document-title">
+                {isBatch ? `Compressing ${items.length} PDF Files…` : "Compressing PDF…"}
+              </h1>
               <p className="tool-header-subtitle">
-                {fileInfo?.name} · {strength}% compression strength
+                {isBatch
+                  ? `Batch processing · ${strength}% compression strength`
+                  : `${fileInfo?.name} · ${strength}% compression strength`}
               </p>
             </div>
           </div>
@@ -283,7 +361,7 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
           </div>
 
           <h2 className="processing-title">
-            {progress?.status || "Optimizing embedded images…"}
+            {batchProgress?.status || progress?.status || "Optimizing document…"}
           </h2>
           <p className="processing-sub">
             Processing locally on your device. Original text and vector lines stay completely intact.
@@ -292,23 +370,51 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
           <div className="processing-meter-box">
             <div className="progress-status-row">
               <span className="progress-status-text">
-                {progress?.status || "Processing…"}
+                {batchProgress?.status || progress?.status || "Processing…"}
               </span>
               <span className="progress-percent-text">
-                {progress?.percent || 0}%
+                {batchProgress?.percent || progress?.percent || 0}%
               </span>
             </div>
             <div className="progress-bar-track">
               <div
                 className="progress-bar-fill"
-                style={{ width: `${progress?.percent || 5}%` }}
+                style={{ width: `${batchProgress?.percent || progress?.percent || 5}%` }}
                 role="progressbar"
-                aria-valuenow={progress?.percent || 0}
+                aria-valuenow={batchProgress?.percent || progress?.percent || 0}
                 aria-valuemin={0}
                 aria-valuemax={100}
               />
             </div>
           </div>
+
+          {/* Batch Progress List */}
+          {isBatch && (
+            <div className="batch-progress-list" role="list" aria-label="Batch files status">
+              {items.map((it, idx) => (
+                <div
+                  key={it.id}
+                  className={`batch-progress-row ${it.status === "processing" ? "processing" : ""}`}
+                >
+                  <div className="batch-progress-file-info">
+                    <PdfDocIcon className="batch-file-icon" />
+                    <span className="batch-progress-filename" title={it.name}>
+                      {idx + 1}. {it.name}
+                    </span>
+                  </div>
+                  <span className={`batch-status-badge ${it.status}`}>
+                    {it.status === "completed"
+                      ? "✓ Done"
+                      : it.status === "processing"
+                      ? "● Compressing…"
+                      : it.status === "failed"
+                      ? "✕ Error"
+                      : "Queued"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="processing-actions-row">
             <button
@@ -331,75 +437,118 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
     );
   }
 
-  // 4. RESULT STAGE: Dedicated Result Screen
-  if (route.stage === "result" && result) {
-    return (
-      <div className="folio-workspace tool-generic-workspace compress-workspace result-workspace">
-        <div className="tool-workspace-header">
-          <div className="header-nav-inline">
-            <button
-              type="button"
-              className="btn-inapp-back"
-              onClick={() => router.navigate({ toolId: "compress-pdf", stage: "editor" })}
-              aria-label="Back to editor"
-            >
-              ← Edit settings
-            </button>
-            <div>
-              <h1 className="document-title">Compression Complete</h1>
-              <p className="tool-header-subtitle">
-                {fileInfo?.name}
-              </p>
-            </div>
-          </div>
-        </div>
+  // 4. RESULT STAGE: Dedicated Result Screen (Single or Batch)
+  if (route.stage === "result") {
+    const isBatch = items.length > 1;
 
-        <div className="result-hero-card">
-          <div className="result-hero-icon-wrap">
-            <span className="result-badge-check">{result.isReduced ? "✓" : "ℹ"}</span>
-          </div>
-
-          <h2 className="result-hero-heading">
-            {result.isReduced ? "Your PDF is ready!" : "PDF Already Optimized"}
-          </h2>
-
-          <p className="result-hero-desc">
-            {result.isReduced
-              ? `Preserved all ${result.pageCount} pages and text. Embedded images were optimized at ${result.strength}% strength.`
-              : "These settings did not reduce this PDF. It may already be optimized. You can download the original file or adjust compression strength."}
-          </p>
-
-          <div className="compress-stats-grid result-page-stats">
-            <div className="stat-item">
-              <span className="stat-label">Original size</span>
-              <span className="stat-val">{(result.originalBytes / 1024).toFixed(0)} KB</span>
-            </div>
-            <div className="stat-item">
-              <span className="stat-label">Output size</span>
-              <span className="stat-val">{(result.outputBytes / 1024).toFixed(0)} KB</span>
-            </div>
-            <div className="stat-item highlight">
-              <span className="stat-label">Savings</span>
-              <span className="stat-val">{result.isReduced ? `−${result.percentSaved}%` : "0%"}</span>
+    // A. BATCH RESULT SCREEN
+    if (isBatch) {
+      return (
+        <div className="folio-workspace tool-generic-workspace compress-workspace result-workspace">
+          <div className="tool-workspace-header">
+            <div className="header-nav-inline">
+              <button
+                type="button"
+                className="btn-inapp-back"
+                onClick={() => router.navigate({ toolId: "compress-pdf", stage: "editor" })}
+                aria-label="Back to editor"
+              >
+                ← Edit settings
+              </button>
+              <div>
+                <h1 className="document-title">Batch Compression Complete</h1>
+                <p className="tool-header-subtitle">
+                  {completedCount} of {items.length} PDF files processed
+                </p>
+              </div>
             </div>
           </div>
 
-          {isOutdated && (
-            <div className="outdated-warning-chip result-outdated-banner">
-              ⚠ Settings were changed since this file was generated.
+          <div className="result-hero-card" style={{ maxWidth: "680px" }}>
+            <div className="result-hero-icon-wrap">
+              <span className="result-badge-check">✓</span>
             </div>
-          )}
 
-          <div className="result-cta-group">
-            <a
-              href={result.isReduced ? result.url : (file ? URL.createObjectURL(file) : "#")}
-              download={result.isReduced ? result.filename : (fileInfo?.name || "document.pdf")}
-              className="btn-download-primary"
-            >
-              ⬇ {result.isReduced ? "Download Compressed PDF" : "Download Original PDF"}
-            </a>
+            <h2 className="result-hero-heading">All PDFs Processed Successfully!</h2>
+            <p className="result-hero-desc">
+              Preserved all text, fonts, and vector elements across {items.length} documents. Embedded images were optimized at {strength}% strength.
+            </p>
 
-            <div className="result-sub-actions">
+            <div className="compress-stats-grid result-page-stats">
+              <div className="stat-item">
+                <span className="stat-label">Total original</span>
+                <span className="stat-val">{formatBytes(totalOriginalBytes)}</span>
+              </div>
+              <div className="stat-item">
+                <span className="stat-label">Total output</span>
+                <span className="stat-val">{formatBytes(totalOutputBytes)}</span>
+              </div>
+              <div className="stat-item highlight">
+                <span className="stat-label">Total savings</span>
+                <span className="stat-val">
+                  {totalReduced
+                    ? `−${totalPercentSaved}% (${formatBytes(totalOriginalBytes - totalOutputBytes)} saved)`
+                    : "0%"}
+                </span>
+              </div>
+            </div>
+
+            {/* Primary Action: Download All as ZIP */}
+            {zipUrl ? (
+              <a
+                href={zipUrl}
+                download="folio_compressed_pdfs.zip"
+                className="btn-download-zip-hero"
+              >
+                ⬇ Download All as ZIP ({items.length} PDFs · {formatBytes(totalOutputBytes)})
+              </a>
+            ) : null}
+
+            {/* File-by-file breakdown */}
+            <div className="batch-results-list" role="list" aria-label="Individual compressed files">
+              {items.map((it) => {
+                const itemRes = it.result;
+                const isReduced = itemRes?.isReduced;
+                const downloadUrl = isReduced
+                  ? itemRes.url
+                  : URL.createObjectURL(it.file);
+                const downloadFilename = isReduced ? itemRes.filename : it.name;
+
+                return (
+                  <div key={it.id} className="batch-result-row">
+                    <div className="batch-result-info">
+                      <PdfDocIcon className="batch-file-icon" />
+                      <div className="batch-file-texts">
+                        <span className="batch-file-name" title={it.name}>
+                          {it.name}
+                        </span>
+                        <div className="batch-result-meta">
+                          <span>
+                            {formatBytes(it.size)} →{" "}
+                            {itemRes ? formatBytes(itemRes.outputBytes) : "N/A"}
+                          </span>
+                          {isReduced && (
+                            <span className="batch-savings-tag">
+                              −{itemRes.percentSaved}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <a
+                      href={downloadUrl}
+                      download={downloadFilename}
+                      className="btn-download-file-item"
+                    >
+                      ⬇ Download
+                    </a>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="result-sub-actions" style={{ marginTop: "24px" }}>
               <button
                 type="button"
                 className="btn-secondary-action"
@@ -415,25 +564,132 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
                   router.navigate({ toolId: "compress-pdf", stage: "upload" });
                 }}
               >
-                Compress another file
+                Compress another batch
               </button>
             </div>
           </div>
         </div>
-      </div>
-    );
+      );
+    }
+
+    // B. SINGLE FILE RESULT SCREEN
+    if (result) {
+      return (
+        <div className="folio-workspace tool-generic-workspace compress-workspace result-workspace">
+          <div className="tool-workspace-header">
+            <div className="header-nav-inline">
+              <button
+                type="button"
+                className="btn-inapp-back"
+                onClick={() => router.navigate({ toolId: "compress-pdf", stage: "editor" })}
+                aria-label="Back to editor"
+              >
+                ← Edit settings
+              </button>
+              <div>
+                <h1 className="document-title">Compression Complete</h1>
+                <p className="tool-header-subtitle">{fileInfo?.name}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="result-hero-card">
+            <div className="result-hero-icon-wrap">
+              <span className="result-badge-check">{result.isReduced ? "✓" : "ℹ"}</span>
+            </div>
+
+            <h2 className="result-hero-heading">
+              {result.isReduced ? "Your PDF is ready!" : "PDF Already Optimized"}
+            </h2>
+
+            <p className="result-hero-desc">
+              {result.isReduced
+                ? `Preserved all ${result.pageCount} pages and text. Embedded images were optimized at ${result.strength}% strength.`
+                : "These settings did not reduce this PDF. It may already be optimized. You can download the original file or adjust compression strength."}
+            </p>
+
+            <div className="compress-stats-grid result-page-stats">
+              <div className="stat-item">
+                <span className="stat-label">Original size</span>
+                <span className="stat-val">{formatBytes(result.originalBytes)}</span>
+              </div>
+              <div className="stat-item">
+                <span className="stat-label">Output size</span>
+                <span className="stat-val">{formatBytes(result.outputBytes)}</span>
+              </div>
+              <div className="stat-item highlight">
+                <span className="stat-label">Savings</span>
+                <span className="stat-val">
+                  {result.isReduced ? `−${result.percentSaved}%` : "0%"}
+                </span>
+              </div>
+            </div>
+
+            {isOutdated && (
+              <div className="outdated-warning-chip result-outdated-banner">
+                ⚠ Settings were changed since this file was generated.
+              </div>
+            )}
+
+            <div className="result-cta-group">
+              <a
+                href={
+                  result.isReduced
+                    ? result.url
+                    : file
+                    ? URL.createObjectURL(file)
+                    : "#"
+                }
+                download={
+                  result.isReduced
+                    ? result.filename
+                    : fileInfo?.name || "document.pdf"
+                }
+                className="btn-download-primary"
+              >
+                ⬇ {result.isReduced ? "Download Compressed PDF" : "Download Original PDF"}
+              </a>
+
+              <div className="result-sub-actions">
+                <button
+                  type="button"
+                  className="btn-secondary-action"
+                  onClick={() => router.navigate({ toolId: "compress-pdf", stage: "editor" })}
+                >
+                  Adjust settings & retry
+                </button>
+                <button
+                  type="button"
+                  className="btn-text-action"
+                  onClick={() => {
+                    compressionSessionStore.reset();
+                    router.navigate({ toolId: "compress-pdf", stage: "upload" });
+                  }}
+                >
+                  Compress another file
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
   }
 
-  // 5. EDITOR STAGE: The Main Mobile Compression Redesign
+  // 5. EDITOR STAGE: The Main Compression Workspace
+  const isBatch = items.length > 1;
+
   return (
     <div className="folio-workspace tool-generic-workspace compress-workspace editor-workspace">
+      {/* Hidden file input for adding more files */}
       <input
-        ref={fileInputRef}
+        ref={addMoreInputRef}
         type="file"
+        multiple
         accept="application/pdf"
         style={{ display: "none" }}
         onChange={(e) => {
-          if (e.target.files?.[0]) handleSelectFile(e.target.files[0]);
+          if (e.target.files?.length) handleAddMoreFiles(e.target.files);
           e.target.value = "";
         }}
       />
@@ -452,19 +708,33 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
           <div>
             <h1 className="document-title">Compress PDF</h1>
             <p className="tool-header-subtitle">
-              Adjust compression settings and preview changes before saving.
+              {isBatch
+                ? `Batch mode: ${items.length} PDF files selected.`
+                : "Adjust compression settings and preview changes before saving."}
             </p>
           </div>
         </div>
 
-        <button
-          type="button"
-          className="btn-change-file"
-          onClick={() => fileInputRef.current?.click()}
-          aria-label="Change current PDF file"
-        >
-          Change PDF
-        </button>
+        <div className="header-right-actions">
+          <button
+            type="button"
+            className="btn-secondary-action"
+            onClick={() => addMoreInputRef.current?.click()}
+            aria-label="Add more PDF files"
+          >
+            + Add More PDFs
+          </button>
+          {items.length > 0 && (
+            <button
+              type="button"
+              className="btn-text-action"
+              onClick={handleClearAll}
+              aria-label="Clear all files"
+            >
+              Clear All
+            </button>
+          )}
+        </div>
       </div>
 
       {errorMessage && (
@@ -480,14 +750,17 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
         </div>
       )}
 
-      {/* Background Processing Indicator banner (if user backed out during processing) */}
-      {jobStatus === "processing" && progress && (
+      {/* Background Processing Indicator banner */}
+      {jobStatus === "processing" && (batchProgress || progress) && (
         <div className="bg-processing-banner" role="status">
           <div className="bg-processing-left">
             <div className="spinner-small" />
             <div className="bg-processing-text">
               <strong>Compression running in background…</strong>
-              <span>{progress.status} ({progress.percent}%)</span>
+              <span>
+                {batchProgress?.status || progress?.status} (
+                {batchProgress?.percent || progress?.percent}%)
+              </span>
             </div>
           </div>
           <div className="bg-processing-actions">
@@ -512,19 +785,91 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
       <div className="tool-content-layout compress-responsive-layout">
         {/* Left Column / Mobile Order Items */}
         <div className="compress-main-flow">
-          {/* 2. Filename, Original Size, and Page Count Badge */}
-          <div className="file-hero-badge">
-            <PdfDocIcon className="file-hero-icon" />
-            <div className="file-hero-info">
-              <h3 className="file-hero-title">{fileInfo?.name}</h3>
-              <p className="file-hero-meta">
-                {fileInfo?.pageCount} {fileInfo?.pageCount === 1 ? "page" : "pages"} ·{" "}
-                {((fileInfo?.size || 0) / 1024).toFixed(0)} KB
-                {(fileInfo?.size || 0) > 1024 * 1024 &&
-                  ` (${((fileInfo?.size || 0) / (1024 * 1024)).toFixed(2)} MB)`}
-              </p>
+          {/* BATCH FILES MANAGER CARD (When 2+ files are uploaded) */}
+          {isBatch ? (
+            <div className="batch-files-card">
+              <div className="batch-files-header">
+                <div className="batch-files-title-row">
+                  <h3 className="batch-files-heading">Batch Files ({items.length})</h3>
+                  <span className="batch-files-badge">
+                    {formatBytes(totalOriginalBytes)} · {totalPages} pages total
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="btn-add-batch-more"
+                  onClick={() => addMoreInputRef.current?.click()}
+                >
+                  <PlusIcon className="icon-small" /> Add More PDFs
+                </button>
+              </div>
+
+              <div className="batch-files-list" role="list" aria-label="Batch files list">
+                {items.map((it) => {
+                  const isActive = it.id === activeItemId;
+                  return (
+                    <div
+                      key={it.id}
+                      className={`batch-file-row ${isActive ? "active" : ""}`}
+                    >
+                      <div className="batch-file-info">
+                        <PdfDocIcon className="batch-file-icon" />
+                        <div className="batch-file-texts">
+                          <span className="batch-file-name" title={it.name}>
+                            {it.name}
+                          </span>
+                          <span className="batch-file-meta">
+                            {it.pageCount} {it.pageCount === 1 ? "page" : "pages"} ·{" "}
+                            {formatBytes(it.size)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="batch-file-actions">
+                        {isActive ? (
+                          <span className="batch-preview-pill">Active Preview</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn-select-preview"
+                            onClick={() => handleSetActiveFile(it.id)}
+                            title="Preview compression for this file"
+                          >
+                            Preview
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn-remove-batch-file"
+                          onClick={() => handleRemoveFile(it.id)}
+                          aria-label={`Remove ${it.name}`}
+                          title="Remove file"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="batch-scope-notice">
+                Settings below will apply to all {items.length} files upon compression.
+              </div>
             </div>
-          </div>
+          ) : (
+            /* Single File Hero Badge */
+            <div className="file-hero-badge">
+              <PdfDocIcon className="file-hero-icon" />
+              <div className="file-hero-info">
+                <h3 className="file-hero-title">{fileInfo?.name}</h3>
+                <p className="file-hero-meta">
+                  {fileInfo?.pageCount} {fileInfo?.pageCount === 1 ? "page" : "pages"} ·{" "}
+                  {formatBytes(fileInfo?.size || 0)}
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* 3. Compression Presets */}
           <div className="setting-group preset-group-card">
@@ -603,7 +948,7 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
             </div>
 
             <p className="slider-explanation">
-              Strength sets image downsampling and quality targets. This percentage does not guarantee an identical reduction in file size.
+              Strength sets image downsampling and quality targets across embedded PDF raster images. Text and vector graphics remain fully intact.
             </p>
 
             <div className="engine-mapping-pill">
@@ -612,7 +957,7 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
             </div>
           </div>
 
-          {/* 5. Compact Optional Preview */}
+          {/* 5. Interactive Before/After Preview */}
           <div className="compress-compact-preview-card">
             <div className="compact-preview-top-bar">
               <div className="segmented-control mode-selector">
@@ -632,19 +977,43 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
                 </button>
               </div>
 
-              <button
-                ref={expandBtnRef}
-                type="button"
-                className="btn-expand-preview"
-                onClick={() => router.openOverlay("preview")}
-                title="Open full comparison view"
-                aria-label="Expand preview comparison"
-              >
-                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" fill="none" strokeWidth="2">
-                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-                </svg>
-                <span>Expand</span>
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                {isBatch && (
+                  <span
+                    style={{
+                      fontSize: "12px",
+                      color: "var(--text-muted)",
+                      maxWidth: "200px",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={fileInfo?.name}
+                  >
+                    {fileInfo?.name}
+                  </span>
+                )}
+                <button
+                  ref={expandBtnRef}
+                  type="button"
+                  className="btn-expand-preview"
+                  onClick={() => router.openOverlay("preview")}
+                  title="Open full comparison view"
+                  aria-label="Expand preview comparison"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="16"
+                    height="16"
+                    stroke="currentColor"
+                    fill="none"
+                    strokeWidth="2"
+                  >
+                    <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                  </svg>
+                  <span>Expand</span>
+                </button>
+              </div>
             </div>
 
             {/* Single Compact Preview Stage */}
@@ -656,7 +1025,9 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
                       ? previewImages.compressedUrl
                       : previewImages.originalUrl
                   }
-                  alt={`Page ${previewPage} ${previewViewMode === "compressed" ? "compressed preview" : "original"}`}
+                  alt={`Page ${previewPage} ${
+                    previewViewMode === "compressed" ? "compressed preview" : "original"
+                  }`}
                   className="compact-preview-img"
                 />
               ) : (
@@ -684,12 +1055,12 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
                   ← Prev
                 </button>
                 <span className="preview-page-indicator">
-                  Page {previewPage} of {totalPages}
+                  Page {previewPage} of {activePageCount}
                 </span>
                 <button
                   type="button"
                   className="btn-preview-nav"
-                  disabled={previewPage >= totalPages}
+                  disabled={previewPage >= activePageCount}
                   onClick={() => compressionSessionStore.setPreviewPage(previewPage + 1)}
                   aria-label="Next page"
                 >
@@ -697,51 +1068,65 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
                 </button>
               </div>
 
-              {totalPages > 1 && (
+              {activePageCount > 1 && (
                 <form onSubmit={handleJumpSubmit} className="jump-page-form">
-                  <label htmlFor="jump-input" className="jump-label">Jump to:</label>
+                  <label htmlFor="jump-input" className="jump-label">
+                    Jump to:
+                  </label>
                   <input
                     id="jump-input"
                     type="number"
                     min="1"
-                    max={totalPages}
+                    max={activePageCount}
                     value={jumpPage}
                     onChange={(e) => setJumpPage(e.target.value)}
                     className="jump-page-input"
                     aria-label="Jump to page number"
                   />
-                  <button type="submit" className="btn-jump-go">Go</button>
+                  <button type="submit" className="btn-jump-go">
+                    Go
+                  </button>
                 </form>
               )}
             </div>
 
             {/* Multi-page Thumbnail Strip (Supports up to 100 pages) */}
-            {totalPages > 1 && (
-              <div className="thumbnail-overview-strip" role="tablist" aria-label="Page selection">
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    role="tab"
-                    aria-selected={previewPage === p}
-                    className={`thumb-page-btn ${previewPage === p ? "active" : ""}`}
-                    onClick={() => compressionSessionStore.setPreviewPage(p)}
-                    title={`Page ${p}`}
-                  >
-                    <span>{p}</span>
-                  </button>
-                ))}
+            {activePageCount > 1 && (
+              <div
+                className="thumbnail-overview-strip"
+                role="tablist"
+                aria-label="Page selection"
+              >
+                {Array.from({ length: Math.min(100, activePageCount) }, (_, i) => i + 1).map(
+                  (p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      role="tab"
+                      aria-selected={previewPage === p}
+                      className={`thumb-page-btn ${previewPage === p ? "active" : ""}`}
+                      onClick={() => compressionSessionStore.setPreviewPage(p)}
+                      title={`Page ${p}`}
+                    >
+                      <span>{p}</span>
+                    </button>
+                  )
+                )}
               </div>
             )}
 
             <p className="preview-caption">
-              Sample preview (Page {previewPage}). Shows simulated image downsampling at strength {strength}%. Text and vector shapes are unaffected.
+              Sample preview ({fileInfo?.name} · Page {previewPage}). Shows simulated image downsampling at strength {strength}%. Text and vector shapes are unaffected.
             </p>
           </div>
 
-          {/* 6. Progress or Result Details Card */}
-          {result && jobStatus !== "processing" && (
-            <div className={`export-result-card compress-result-card ${!result.isReduced ? "result-no-reduction" : ""}`}>
+          {/* Quick Result Details Card (if already compressed) */}
+          {result && jobStatus !== "processing" && !isBatch && (
+            <div
+              className={`export-result-card compress-result-card ${
+                !result.isReduced ? "result-no-reduction" : ""
+              }`}
+            >
               <div className="result-header">
                 <span className="result-check">{result.isReduced ? "✓" : "ℹ"}</span>
                 <strong>
@@ -752,15 +1137,17 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
               <div className="compress-stats-grid">
                 <div className="stat-item">
                   <span className="stat-label">Original</span>
-                  <span className="stat-val">{(result.originalBytes / 1024).toFixed(0)} KB</span>
+                  <span className="stat-val">{formatBytes(result.originalBytes)}</span>
                 </div>
                 <div className="stat-item">
                   <span className="stat-label">Compressed</span>
-                  <span className="stat-val">{(result.outputBytes / 1024).toFixed(0)} KB</span>
+                  <span className="stat-val">{formatBytes(result.outputBytes)}</span>
                 </div>
                 <div className="stat-item highlight">
                   <span className="stat-label">Savings</span>
-                  <span className="stat-val">{result.isReduced ? `−${result.percentSaved}%` : "0%"}</span>
+                  <span className="stat-val">
+                    {result.isReduced ? `−${result.percentSaved}%` : "0%"}
+                  </span>
                 </div>
               </div>
 
@@ -772,8 +1159,18 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
 
               <div className="result-card-actions">
                 <a
-                  href={result.isReduced ? result.url : (file ? URL.createObjectURL(file) : "#")}
-                  download={result.isReduced ? result.filename : (fileInfo?.name || "document.pdf")}
+                  href={
+                    result.isReduced
+                      ? result.url
+                      : file
+                      ? URL.createObjectURL(file)
+                      : "#"
+                  }
+                  download={
+                    result.isReduced
+                      ? result.filename
+                      : fileInfo?.name || "document.pdf"
+                  }
                   className="btn-download-result text-center"
                 >
                   ⬇ {result.isReduced ? "Download Compressed PDF" : "Download Original File"}
@@ -788,12 +1185,18 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
           <h2 className="sidebar-heading">Action Summary</h2>
           <div className="sidebar-summary-box">
             <div className="summary-row">
-              <span className="summary-label">Document:</span>
-              <strong className="summary-val">{fileInfo?.name}</strong>
+              <span className="summary-label">Document(s):</span>
+              <strong className="summary-val">
+                {isBatch ? `${items.length} PDF Documents` : fileInfo?.name}
+              </strong>
             </div>
             <div className="summary-row">
-              <span className="summary-label">Pages:</span>
+              <span className="summary-label">Total pages:</span>
               <span className="summary-val">{totalPages}</span>
+            </div>
+            <div className="summary-row">
+              <span className="summary-label">Total size:</span>
+              <span className="summary-val">{formatBytes(totalOriginalBytes)}</span>
             </div>
             <div className="summary-row">
               <span className="summary-label">Preset:</span>
@@ -822,9 +1225,15 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
               <CompressIcon className="btn-pdf-icon" />
               <span>
                 {result && isOutdated
-                  ? "Compress with updated settings"
+                  ? isBatch
+                    ? `Compress ${items.length} PDFs (Updated)`
+                    : "Compress with updated settings"
                   : result
-                  ? "Recompress PDF"
+                  ? isBatch
+                    ? `Recompress ${items.length} PDFs`
+                    : "Recompress PDF"
+                  : isBatch
+                  ? `Compress ${items.length} PDFs`
                   : "Compress PDF"}
               </span>
             </button>
@@ -842,12 +1251,14 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
         </aside>
       </div>
 
-      {/* 7. Mobile Sticky Bottom Action Bar with Safe-Area Inset */}
+      {/* Mobile Sticky Bottom Action Bar with Safe-Area Inset */}
       <div className="mobile-sticky-bottom-bar mobile-only">
         {jobStatus === "processing" ? (
           <div className="mobile-sticky-progress-row">
             <div className="mobile-progress-text">
-              <span>Compressing… {progress?.percent || 0}%</span>
+              <span>
+                Compressing… {batchProgress?.percent || progress?.percent || 0}%
+              </span>
             </div>
             <button
               type="button"
@@ -866,9 +1277,15 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
             <CompressIcon className="btn-pdf-icon" />
             <span>
               {result && isOutdated
-                ? "Compress (Updated Settings)"
+                ? isBatch
+                  ? `Compress ${items.length} PDFs (Updated)`
+                  : "Compress (Updated Settings)"
                 : result
-                ? "Recompress PDF"
+                ? isBatch
+                  ? `Recompress ${items.length} PDFs`
+                  : "Recompress PDF"
+                : isBatch
+                ? `Compress ${items.length} PDFs`
                 : "Compress PDF"}
             </span>
           </button>
@@ -882,7 +1299,7 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
         previewImages={previewImages}
         isLoading={isPreviewLoading}
         currentPage={previewPage}
-        totalPages={totalPages}
+        totalPages={activePageCount}
         strength={strength}
         onPageChange={(p) => compressionSessionStore.setPreviewPage(p)}
         triggerRef={expandBtnRef}

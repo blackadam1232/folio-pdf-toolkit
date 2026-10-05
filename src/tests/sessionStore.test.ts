@@ -83,4 +83,49 @@ describe("Compression Session Store", () => {
     expect(state.strength).toBe(85);
     expect(state.preset).toBe("smallest");
   });
+
+  it("stores multiple PDF files in batch mode and supports switching and removing files", async () => {
+    const file1 = await createTestPdf();
+    const file2 = await createTestPdf();
+
+    const success = await compressionSessionStore.addFiles([file1, file2], true);
+    expect(success).toBe(true);
+
+    const state = compressionSessionStore.getState();
+    expect(state.items.length).toBe(2);
+    expect(state.activeItemId).toBe(state.items[0].id);
+    expect(state.file).toBe(file1);
+
+    // Switch active file
+    const secondId = state.items[1].id;
+    compressionSessionStore.setActiveFile(secondId);
+    expect(compressionSessionStore.getState().activeItemId).toBe(secondId);
+    expect(compressionSessionStore.getState().file).toBe(file2);
+
+    // Remove first file
+    const firstId = state.items[0].id;
+    compressionSessionStore.removeFile(firstId);
+    const updatedState = compressionSessionStore.getState();
+    expect(updatedState.items.length).toBe(1);
+    expect(updatedState.items[0].id).toBe(secondId);
+  });
+
+  it("compresses multiple PDF files in batch and packages results into a ZIP archive", async () => {
+    const file1 = await createTestPdf();
+    const file2 = await createTestPdf();
+
+    await compressionSessionStore.addFiles([file1, file2], true);
+    compressionSessionStore.setSettings(50, "balanced");
+
+    const result = await compressionSessionStore.startCompression();
+    expect(result).not.toBeNull();
+
+    const state = compressionSessionStore.getState();
+    expect(state.jobStatus).toBe("completed");
+    expect(state.items.every((it) => it.status === "completed")).toBe(true);
+    expect(Object.keys(state.results).length).toBe(2);
+    expect(state.zipBlob).not.toBeNull();
+    expect(state.zipUrl).not.toBeNull();
+  });
 });
+

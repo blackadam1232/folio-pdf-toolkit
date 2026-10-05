@@ -56,10 +56,18 @@ export interface ToolMetadata {
   isFeatured?: boolean;
 }
 
+export interface CropRect {
+  x: number; // 0 <= x < 1 (fraction of oriented image width)
+  y: number; // 0 <= y < 1 (fraction of oriented image height)
+  width: number; // 0 < width <= 1
+  height: number; // 0 < height <= 1
+}
+
 export interface PerPageOptions {
   pageSize?: PageSizeOption;
   orientation?: OrientationOption;
   fit?: FitOption;
+  profile?: ProfileOption;
   marginPreset?: MarginPresetOption;
   marginMm?: number;
   customMargins?: [number, number, number, number];
@@ -75,6 +83,9 @@ export interface ImageItem {
   width: number;
   height: number;
   rotation: number; // 0, 90, 180, 270
+  flipH?: boolean;
+  flipV?: boolean;
+  crop?: CropRect;
   customOptions?: PerPageOptions;
 }
 

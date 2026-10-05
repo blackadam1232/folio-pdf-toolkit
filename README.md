@@ -57,7 +57,11 @@ Folio includes a centralized tool registry and full client-side engines for:
 8. **Text Watermark**:
    - Custom watermark text with quick presets (`CONFIDENTIAL`, `DRAFT`, `SAMPLE`, `COPY`).
    - Placement: Diagonal center ($45^\circ$), Center, Header, or Footer.
-   - Adjustable opacity ($5\% - 80\%$) and font sizing.
+9. **Compress PDF (Single & Batch)**:
+   - Optimize individual PDF files or large batches of PDFs simultaneously.
+   - Preserves text, fonts, bookmarks, vector lines, and document structure intact while re-compressing embedded raster images.
+   - Interactive before-and-after sample comparison preview.
+   - Batch results dashboard with combined space savings and 1-click ZIP archive download (`.zip`) or individual PDF downloads.
 
 ---
 
@@ -74,8 +78,8 @@ Creating a PDF does **not** destroy or lock your workspace:
 ## Practical Device Limits
 
 Because document processing occurs in client memory:
-- **Max batch size**: 150 files per export
-- **Max total memory**: 300 MB total file data
+- **Max batch size**: 500 files per export (comfortably supports 200+ images per document)
+- **Max total memory**: 1 GB total file data
 - **Max image resolution**: 40 Megapixels ($40{,}000{,}000\text{ pixels}$) per image
 - **Encrypted PDFs**: Password-protected PDFs are detected and rejected honestly; Folio does not bypass PDF encryption.
 

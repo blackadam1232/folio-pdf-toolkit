@@ -46,10 +46,31 @@ describe("Validation & Safety Limits", () => {
   });
 
   describe("Safety Thresholds", () => {
-    it("enforces documented limits", () => {
-      expect(MAX_FILES_LIMIT).toBe(150);
-      expect(MAX_TOTAL_BYTES_LIMIT).toBe(300 * 1024 * 1024);
+    it("enforces documented limits supporting batches of 200+ images", () => {
+      expect(MAX_FILES_LIMIT).toBe(500);
+      expect(MAX_TOTAL_BYTES_LIMIT).toBe(1024 * 1024 * 1024);
       expect(MAX_PIXELS_LIMIT).toBe(40_000_000);
+      // Min 200 images requirement:
+      expect(MAX_FILES_LIMIT).toBeGreaterThanOrEqual(200);
+    });
+
+    it("accepts batches of 200 or more images within limit", () => {
+      const mockBatch200 = Array.from({ length: 200 }, (_, i) => ({
+        id: `img_${i}`,
+        file: new File([""], `image_${i}.jpg`, { type: "image/jpeg" }),
+        name: `image_${i}.jpg`,
+        size: 500 * 1024,
+        modified: Date.now(),
+        objectUrl: "blob:mock",
+        width: 1000,
+        height: 1000,
+        rotation: 0,
+      }));
+
+      expect(mockBatch200.length).toBe(200);
+      expect(mockBatch200.length).toBeLessThanOrEqual(MAX_FILES_LIMIT);
+      const totalBytes = mockBatch200.reduce((acc, it) => acc + it.size, 0);
+      expect(totalBytes).toBeLessThan(MAX_TOTAL_BYTES_LIMIT);
     });
   });
 

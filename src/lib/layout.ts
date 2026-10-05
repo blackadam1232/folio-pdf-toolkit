@@ -1,4 +1,4 @@
-import { MarginsPt, PageGeometry, PdfOptions } from "../types";
+import { CropRect, MarginsPt, PageGeometry, PdfOptions } from "../types";
 
 export const MM_TO_PT = 72 / 25.4; // 1 mm ~ 2.834645669 points
 
@@ -49,6 +49,7 @@ export interface GeometryInput {
   imageWidth: number;
   imageHeight: number;
   rotation?: number; // 0, 90, 180, 270
+  crop?: CropRect;
   dpi?: number;
   options: PdfOptions;
 }
@@ -58,7 +59,7 @@ export interface GeometryInput {
  * Throws a descriptive error if the margin configuration is impossible (leaves <= 0 printable area).
  */
 export function calculateGeometry(input: GeometryInput): PageGeometry {
-  const { imageWidth, imageHeight, rotation = 0, dpi = 96, options } = input;
+  const { imageWidth, imageHeight, rotation = 0, crop, dpi = 96, options } = input;
 
   if (imageWidth <= 0 || imageHeight <= 0) {
     throw new Error("Invalid image dimensions: width and height must be positive numbers.");
@@ -67,8 +68,12 @@ export function calculateGeometry(input: GeometryInput): PageGeometry {
   // Handle rotation: 90 and 270 swap effective width and height
   const normalizedRotation = ((rotation % 360) + 360) % 360;
   const isQuarterTurn = normalizedRotation === 90 || normalizedRotation === 270;
-  const effectiveWidth = isQuarterTurn ? imageHeight : imageWidth;
-  const effectiveHeight = isQuarterTurn ? imageWidth : imageHeight;
+  const orientedWidth = isQuarterTurn ? imageHeight : imageWidth;
+  const orientedHeight = isQuarterTurn ? imageWidth : imageHeight;
+
+  // Effective dimensions after manual crop
+  const effectiveWidth = crop && crop.width > 0 ? Math.max(1, Math.round(orientedWidth * crop.width)) : orientedWidth;
+  const effectiveHeight = crop && crop.height > 0 ? Math.max(1, Math.round(orientedHeight * crop.height)) : orientedHeight;
 
   const marginsPt = resolveMarginsPt(options);
   const horizontalMargins = marginsPt.left + marginsPt.right;
@@ -122,10 +127,21 @@ export function calculateGeometry(input: GeometryInput): PageGeometry {
   let rectHeight = printableHeightPt;
   let cropRect: PageGeometry["cropRect"] | undefined = undefined;
 
+  const manualCropX = crop ? Math.round(crop.x * orientedWidth) : 0;
+  const manualCropY = crop ? Math.round(crop.y * orientedHeight) : 0;
+
   if (options.fit === "Original") {
     // 1:1 points centered
     rectWidth = (effectiveWidth * 72) / dpi;
     rectHeight = (effectiveHeight * 72) / dpi;
+    if (crop) {
+      cropRect = {
+        sx: manualCropX,
+        sy: manualCropY,
+        sWidth: effectiveWidth,
+        sHeight: effectiveHeight,
+      };
+    }
   } else if (options.fit === "Contain") {
     const scale = Math.min(
       printableWidthPt / effectiveWidth,
@@ -133,6 +149,14 @@ export function calculateGeometry(input: GeometryInput): PageGeometry {
     );
     rectWidth = effectiveWidth * scale;
     rectHeight = effectiveHeight * scale;
+    if (crop) {
+      cropRect = {
+        sx: manualCropX,
+        sy: manualCropY,
+        sWidth: effectiveWidth,
+        sHeight: effectiveHeight,
+      };
+    }
   } else if (options.fit === "Cover") {
     // In Cover mode, the image fills the entire printable area.
     // The imageRect occupies the entire printable area.
@@ -146,12 +170,12 @@ export function calculateGeometry(input: GeometryInput): PageGeometry {
     );
     const visibleSourceWidth = printableWidthPt / coverScale;
     const visibleSourceHeight = printableHeightPt / coverScale;
-    const sx = Math.max(0, (effectiveWidth - visibleSourceWidth) / 2);
-    const sy = Math.max(0, (effectiveHeight - visibleSourceHeight) / 2);
+    const coverOffsetX = Math.max(0, (effectiveWidth - visibleSourceWidth) / 2);
+    const coverOffsetY = Math.max(0, (effectiveHeight - visibleSourceHeight) / 2);
 
     cropRect = {
-      sx,
-      sy,
+      sx: manualCropX + coverOffsetX,
+      sy: manualCropY + coverOffsetY,
       sWidth: visibleSourceWidth,
       sHeight: visibleSourceHeight,
     };

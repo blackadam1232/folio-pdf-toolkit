@@ -157,4 +157,23 @@ describe("PDF Generation & Reader Verification", () => {
     expect(geometries[2].pageWidthPt).toBeCloseTo(595.28, 1);
     expect(geometries[2].pageHeightPt).toBeCloseTo(841.89, 1);
   });
+
+  it("successfully embeds and produces a 200-page document within memory boundaries", async () => {
+    const doc = await PDFDocument.create();
+    const embeddedImg = await doc.embedJpg(MINIMAL_JPEG);
+
+    // Embed 200 pages
+    for (let i = 0; i < 200; i++) {
+      const page = doc.addPage([300, 400]);
+      page.drawImage(embeddedImg, { x: 10, y: 10, width: 280, height: 380 });
+    }
+
+    expect(doc.getPageCount()).toBe(200);
+    const pdfBytes = await doc.save();
+    expect(pdfBytes.length).toBeGreaterThan(1000);
+
+    const reloaded = await PDFDocument.load(pdfBytes);
+    expect(reloaded.getPageCount()).toBe(200);
+  });
 });
+

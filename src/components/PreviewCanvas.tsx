@@ -38,6 +38,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         imageWidth: item.width,
         imageHeight: item.height,
         rotation: item.rotation,
+        crop: item.crop,
         options: itemOptions,
       });
 
@@ -89,26 +90,26 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         const canvasImageY = pageHeightPt - imageRect.y - imageRect.height;
         const canvasImageX = imageRect.x;
 
-        // Create temporary canvas for rotated image
+        // Create temporary canvas for rotated & flipped image
         const tempCanvas = document.createElement("canvas");
         tempCanvas.width = turnedWidth;
         tempCanvas.height = turnedHeight;
         const tempCtx = tempCanvas.getContext("2d");
         if (tempCtx) {
+          tempCtx.translate(turnedWidth / 2, turnedHeight / 2);
+          if (item.flipH) tempCtx.scale(-1, 1);
+          if (item.flipV) tempCtx.scale(1, -1);
           if (rotation !== 0) {
-            tempCtx.translate(turnedWidth / 2, turnedHeight / 2);
             tempCtx.rotate((rotation * Math.PI) / 180);
-            tempCtx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
-          } else {
-            tempCtx.drawImage(img, 0, 0);
           }
+          tempCtx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
 
           let sx = 0;
           let sy = 0;
           let sWidth = turnedWidth;
           let sHeight = turnedHeight;
 
-          if (itemOptions.fit === "Cover" && cropRect) {
+          if (cropRect) {
             sx = cropRect.sx;
             sy = cropRect.sy;
             sWidth = cropRect.sWidth;
@@ -151,7 +152,15 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [item, options, item?.rotation, item?.customOptions]);
+  }, [
+    item,
+    options,
+    item?.rotation,
+    item?.crop,
+    item?.flipH,
+    item?.flipV,
+    item?.customOptions,
+  ]);
 
   if (!item) {
     return (

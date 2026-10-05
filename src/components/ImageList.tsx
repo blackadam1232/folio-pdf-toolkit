@@ -78,7 +78,7 @@ export const ImageList: React.FC<ImageListProps> = ({
       >
         <div className="dropzone-icon">⇪</div>
         <h3>Drag & drop images here</h3>
-        <p className="hint">Supports JPEG, PNG, and WebP (up to 150 images)</p>
+        <p className="hint">Supports JPEG, PNG, and WebP (up to 500 images)</p>
 
         <div className="dropzone-actions">
           <button

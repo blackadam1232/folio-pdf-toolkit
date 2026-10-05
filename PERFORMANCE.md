@@ -5,7 +5,7 @@
 Folio is designed to process documents directly in browser memory without crashing client tabs or accumulating memory leaks.
 
 ### 1. Sequential Image Processing
-Instead of decoding 50–150 images simultaneously into full-resolution memory canvases (which would consume several gigabytes and crash mobile browsers), Folio processes images **sequentially**:
+Instead of decoding dozens or hundreds of images simultaneously into full-resolution memory canvases (which would consume several gigabytes and crash mobile browsers), Folio processes images **sequentially**:
 1. Allocate an offscreen Canvas for image $i$.
 2. Apply rotation, cropping (for Cover fit), and scaling (based on selected Quality Profile).
 3. Encode to JPEG byte buffer and embed into the PDF structure.
@@ -13,8 +13,8 @@ Instead of decoding 50–150 images simultaneously into full-resolution memory c
 
 ### 2. Bounded Canvas Limits
 - **Max Image Resolution**: 40 Megapixels ($40{,}000{,}000\text{ pixels}$). High-resolution phone photos (e.g. 12 MP – 48 MP) are validated and bounded to ensure canvas allocation never exceeds browser memory limits.
-- **Max Batch Count**: 150 images per export job.
-- **Max Batch Payload**: 300 MB total file data.
+- **Max Batch Count**: 500 images per export job (comfortably handling 200+ images per document).
+- **Max Batch Payload**: 1 GB total file data.
 
 ### 3. Quality Profiles & Output Sizing
 

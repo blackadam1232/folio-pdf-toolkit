@@ -1,8 +1,10 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   ConversionResult,
+  CropRect,
   GenerationProgress,
   ImageItem,
+  MarginPresetOption,
   PdfOptions,
   PerPageOptions,
   SortMode,
@@ -23,6 +25,8 @@ import {
   useDocumentSession,
 } from "../lib/documentSessionStore";
 import { ThumbnailSheet } from "./ThumbnailSheet";
+import { PreviewCanvas } from "./PreviewCanvas";
+import { ImageEditorModal } from "./ImageEditorModal";
 import {
   RotateIcon,
   TrashIcon,
@@ -30,6 +34,8 @@ import {
   PdfDocIcon,
   SettingsIcon,
   PlusIcon,
+  CopyIcon,
+  ResetIcon,
 } from "./Icons";
 
 interface ImagesToPdfWorkspaceProps {
@@ -53,7 +59,8 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
   const progress = session.progress;
   const result = session.result;
 
-  const [scopeMode, setScopeMode] = useState<"all" | "custom">("all");
+  // Scope: "all" (All pages — shared defaults) vs "this-page" (This page — settings for active image only)
+  const [scopeMode, setScopeMode] = useState<"all" | "this-page">("all");
   const [errorMessage, setErrorMessage] = useState<string>(session.errorMessage);
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState<boolean>(false);
   const [isLoadingSamples, setIsLoadingSamples] = useState<boolean>(false);
@@ -63,6 +70,12 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
   const [undoStack, setUndoStack] = useState<ImageItem[] | null>(null);
   const [undoMessage, setUndoMessage] = useState<string>("");
 
+  // Editor Modal State
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+
+  // Apply to all pages confirmation modal
+  const [showApplyAllModal, setShowApplyAllModal] = useState<boolean>(false);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Sorted items based on active sort options
@@ -70,7 +83,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     return sortImageItems(items, options.sort, options.manualOrder);
   }, [items, options.sort, options.manualOrder]);
 
-  // Active inspect item for single page mode
+  // Active inspect item for single page mode & "This page" settings
   const activeInspectItem = useMemo(() => {
     if (!sortedItems.length) return null;
     return (
@@ -86,35 +99,21 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     );
   }, [sortedItems, activeInspectItem]);
 
-  // Active target item when configuring scope (custom per page vs all)
-  const activeTargetItem = useMemo(() => {
-    if (selectedIds.size === 1) {
-      const id = Array.from(selectedIds)[0];
-      return items.find((it) => it.id === id) || activeInspectItem;
-    }
-    return activeInspectItem;
-  }, [selectedIds, items, activeInspectItem]);
+  // Item currently being edited in ImageEditorModal
+  const editingItem = useMemo(() => {
+    if (!editingItemId) return null;
+    return items.find((it) => it.id === editingItemId) || null;
+  }, [items, editingItemId]);
 
-  // Target item IDs for per-page updates
-  const targetIds = useMemo(() => {
-    if (selectedIds.size > 0) {
-      return Array.from(selectedIds);
-    }
-    return activeTargetItem ? [activeTargetItem.id] : [];
-  }, [selectedIds, activeTargetItem]);
+  const editingIndex = useMemo(() => {
+    if (!editingItem) return 0;
+    return Math.max(
+      0,
+      sortedItems.findIndex((it) => it.id === editingItem.id)
+    );
+  }, [sortedItems, editingItem]);
 
-  // Options displayed in the settings controls
-  const currentDisplayOptions: PdfOptions = useMemo(() => {
-    if (scopeMode === "custom" && activeTargetItem) {
-      return {
-        ...options,
-        ...(activeTargetItem.customOptions || {}),
-      };
-    }
-    return options;
-  }, [scopeMode, activeTargetItem, options]);
-
-  // Effective options for the currently active item
+  // Effective options for the active inspect item (inherited + explicit overrides)
   const activeItemOptions = useMemo((): PdfOptions => {
     if (!activeInspectItem) return options;
     return {
@@ -123,29 +122,29 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     };
   }, [activeInspectItem, options]);
 
-  // Handle option changes
+  // Effective options displayed in settings controls depending on scopeMode
+  const currentDisplayOptions: PdfOptions = useMemo(() => {
+    if (scopeMode === "this-page" && activeInspectItem) {
+      return activeItemOptions;
+    }
+    return options;
+  }, [scopeMode, activeInspectItem, activeItemOptions, options]);
+
+  // Handle option changes in shared defaults ("all") vs this page ("this-page")
   const handleOptionChange = <K extends keyof PerPageOptions>(
     key: K,
     value: PerPageOptions[K],
     extraUpdates?: Partial<PerPageOptions>
   ) => {
-    if (scopeMode === "custom") {
-      if (targetIds.length === 0) return;
-      const updated = items.map((it) => {
-        if (targetIds.includes(it.id)) {
-          const currentCustom = it.customOptions || {};
-          return {
-            ...it,
-            customOptions: {
-              ...currentCustom,
-              [key]: value,
-              ...(extraUpdates || {}),
-            },
-          };
-        }
-        return it;
-      });
-      documentSessionStore.setItems(TOOL_ID, updated);
+    if (scopeMode === "this-page") {
+      if (!activeInspectItem) return;
+      documentSessionStore.updateItemCustomOption(
+        TOOL_ID,
+        activeInspectItem.id,
+        key,
+        value,
+        extraUpdates
+      );
     } else {
       documentSessionStore.setOptions(TOOL_ID, {
         [key]: value,
@@ -154,17 +153,27 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     }
   };
 
-  // Reset custom per-page options
-  const handleResetCustomOptions = (idsToReset: string[]) => {
-    const updated = items.map((it) => {
-      if (idsToReset.includes(it.id)) {
-        const itemCopy = { ...it };
-        delete itemCopy.customOptions;
-        return itemCopy;
-      }
-      return it;
-    });
-    documentSessionStore.setItems(TOOL_ID, updated);
+  // Reset a specific property on this page back to document default
+  const handleResetProperty = (property: keyof PerPageOptions) => {
+    if (!activeInspectItem) return;
+    documentSessionStore.resetItemCustomOptionProperty(
+      TOOL_ID,
+      activeInspectItem.id,
+      property
+    );
+  };
+
+  // Reset all page settings for this page back to document defaults
+  const handleResetPageSettings = () => {
+    if (!activeInspectItem) return;
+    documentSessionStore.resetItemCustomOptions(TOOL_ID, activeInspectItem.id);
+  };
+
+  // Apply this page's effective settings to all pages (with confirmation)
+  const handleConfirmApplyToAll = () => {
+    if (!activeInspectItem) return;
+    documentSessionStore.applyItemSettingsToAll(TOOL_ID, activeInspectItem.id);
+    setShowApplyAllModal(false);
   };
 
   // Add files
@@ -184,7 +193,9 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     const currentBytes = items.reduce((sum, it) => sum + it.size, 0);
     const incomingBytes = incoming.reduce((sum, f) => sum + f.size, 0);
     if (currentBytes + incomingBytes > MAX_TOTAL_BYTES_LIMIT) {
-      setErrorMessage("Total batch size exceeds 300MB limit.");
+      setErrorMessage(
+        `Total batch size exceeds ${(MAX_TOTAL_BYTES_LIMIT / (1024 * 1024)).toFixed(0)} MB limit.`
+      );
       return;
     }
 
@@ -255,10 +266,6 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     }
   };
 
-  const handleClearSelection = () => {
-    documentSessionStore.clearSelection(TOOL_ID);
-  };
-
   // Rotate selected
   const handleRotateSelected = () => {
     if (!selectedIds.size) return;
@@ -271,7 +278,12 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     documentSessionStore.rotateItem(TOOL_ID, id, 90);
   };
 
-  // Move selected earlier / later (essential for touch/mobile)
+  // Duplicate single item
+  const handleDuplicateItem = (id: string) => {
+    documentSessionStore.duplicateItem(TOOL_ID, id);
+  };
+
+  // Move selected earlier / later
   const handleMoveSelectedEarlier = () => {
     if (!selectedIds.size) return;
     const currentOrder = [...sortedItems];
@@ -377,31 +389,26 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     document.body.removeChild(a);
   };
 
-  // Preview Aspect Ratio calculation for Single Page Viewer
-  const previewAspectRatio = useMemo(() => {
-    if (!activeInspectItem) return "210 / 297";
-    const eff = {
-      ...options,
-      ...(activeInspectItem.customOptions || {}),
-    };
-    const isQuarter = activeInspectItem.rotation % 180 !== 0;
-    const effW = isQuarter ? activeInspectItem.height : activeInspectItem.width;
-    const effH = isQuarter ? activeInspectItem.width : activeInspectItem.height;
+  // Check if active item has explicit overrides for individual properties
+  const hasCustomOrientation =
+    scopeMode === "this-page" &&
+    activeInspectItem?.customOptions?.orientation !== undefined;
+  const hasCustomPageSize =
+    scopeMode === "this-page" &&
+    activeInspectItem?.customOptions?.pageSize !== undefined;
+  const hasCustomMargins =
+    scopeMode === "this-page" &&
+    activeInspectItem?.customOptions?.marginPreset !== undefined;
+  const hasCustomFit =
+    scopeMode === "this-page" &&
+    activeInspectItem?.customOptions?.fit !== undefined;
+  const hasCustomProfile =
+    scopeMode === "this-page" &&
+    activeInspectItem?.customOptions?.profile !== undefined;
 
-    if (eff.pageSize === "Original") {
-      return `${effW} / ${effH}`;
-    }
-    let landscape = false;
-    if (eff.orientation === "Landscape") {
-      landscape = true;
-    } else if (eff.orientation === "Auto") {
-      landscape = effW > effH;
-    }
-    if (eff.pageSize === "Letter") {
-      return landscape ? "11 / 8.5" : "8.5 / 11";
-    }
-    return landscape ? "297 / 210" : "210 / 297";
-  }, [activeInspectItem, options]);
+  const hasAnyPageOverrides =
+    activeInspectItem?.customOptions &&
+    Object.keys(activeInspectItem.customOptions).length > 0;
 
   return (
     <div className="folio-workspace images-workspace">
@@ -440,7 +447,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
             </div>
 
             <div className="title-controls-group">
-              {/* View Switcher: [ Overview ] [ Single page ] */}
+              {/* View Switcher */}
               <div className="view-mode-toggle" role="tablist" aria-label="View Mode">
                 <button
                   type="button"
@@ -658,6 +665,12 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                       onInspect={(id) => {
                         documentSessionStore.setActiveInspectId(TOOL_ID, id);
                       }}
+                      onEdit={(id) => {
+                        setEditingItemId(id);
+                      }}
+                      onDuplicate={(id) => {
+                        handleDuplicateItem(id);
+                      }}
                       onRotate={(id, e) => handleRotateSingle(id, e)}
                     />
                   ))}
@@ -671,7 +684,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                     Showing pages 1 – {sortedItems.length} of {sortedItems.length}
                   </span>
                   <span className="grid-status-hint desktop-only">
-                    Click a page to inspect or double-click for full page view
+                    Click Edit on any card to crop, rotate, or flip. Click a card to customize its page settings.
                   </span>
                 </div>
               )}
@@ -747,32 +760,24 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                   </button>
                 </div>
 
-                {/* Simulated Paper Sheet */}
+                {/* Accurate layout preview */}
                 <div
-                  className="paper-sheet-preview"
+                  className="paper-sheet-preview-wrap"
                   style={{
                     transform: `scale(${singleZoom})`,
-                    aspectRatio: previewAspectRatio,
                   }}
                 >
-                  <div
-                    className="paper-printable-area"
-                    style={{
-                      padding: `${(activeItemOptions.marginMm ?? 12) * 1.5}px`,
+                  <PreviewCanvas
+                    item={activeInspectItem}
+                    options={options}
+                    pageIndex={activeInspectIndex}
+                    totalPages={sortedItems.length}
+                    onPageChange={(idx) => {
+                      if (sortedItems[idx]) {
+                        documentSessionStore.setActiveInspectId(TOOL_ID, sortedItems[idx].id);
+                      }
                     }}
-                  >
-                    <img
-                      src={activeInspectItem.objectUrl}
-                      alt={activeInspectItem.name}
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit:
-                          activeItemOptions.fit === "Cover" ? "cover" : "contain",
-                        transform: `rotate(${activeInspectItem.rotation}deg)`,
-                      }}
-                    />
-                  </div>
+                  />
                 </div>
 
                 {/* Zoom Controls */}
@@ -809,6 +814,14 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                   >
                     Fit Page
                   </button>
+                  <button
+                    type="button"
+                    className="btn-single-edit-action"
+                    onClick={() => setEditingItemId(activeInspectItem.id)}
+                    title="Edit image crop, rotation, and flip"
+                  >
+                    Edit Image
+                  </button>
                 </div>
               </div>
             </div>
@@ -839,7 +852,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
             <h2>Document settings</h2>
           </div>
 
-          {/* Scope Selector: Apply to all pages vs Custom per page */}
+          {/* Scope Selector: All pages — shared defaults vs This page — settings for the active image only */}
           <div className="setting-scope-toggle" role="tablist">
             <button
               type="button"
@@ -848,41 +861,91 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
               className={`btn-scope-tab ${scopeMode === "all" ? "active" : ""}`}
               onClick={() => setScopeMode("all")}
             >
-              Apply to all pages
+              All pages
             </button>
             <button
               type="button"
               role="tab"
-              aria-selected={scopeMode === "custom"}
-              className={`btn-scope-tab ${scopeMode === "custom" ? "active" : ""}`}
-              onClick={() => setScopeMode("custom")}
+              aria-selected={scopeMode === "this-page"}
+              className={`btn-scope-tab ${scopeMode === "this-page" ? "active" : ""}`}
+              onClick={() => setScopeMode("this-page")}
               disabled={sortedItems.length === 0}
+              title={
+                sortedItems.length === 0
+                  ? "Add images to customize settings for a specific page"
+                  : "Settings for this image only"
+              }
             >
-              Custom per page
+              This page
             </button>
           </div>
 
-          {/* Scope notice banner */}
-          {scopeMode === "custom" && activeTargetItem && (
+          {/* Disabled Help Notice if no items exist */}
+          {sortedItems.length === 0 && (
+            <div className="scope-disabled-hint">
+              <span>Select or upload images to configure individual page settings.</span>
+            </div>
+          )}
+
+          {/* "This page" Scope Notice Banner */}
+          {scopeMode === "this-page" && activeInspectItem && (
             <div className="scope-notice-banner">
-              <span className="scope-notice-label">
-                Editing: Page {activeInspectIndex + 1} ({activeTargetItem.name})
-              </span>
-              {activeTargetItem.customOptions && (
-                <button
-                  type="button"
-                  className="btn-reset-scope"
-                  onClick={() => handleResetCustomOptions([activeTargetItem.id])}
-                >
-                  Reset to default
-                </button>
+              <div className="scope-notice-main">
+                <span className="scope-notice-title">
+                  Editing page {activeInspectIndex + 1} — {activeInspectItem.name}
+                </span>
+                <span className="scope-notice-subtitle">
+                  Changes apply only to this page.
+                </span>
+                {selectedIds.size > 0 && !selectedIds.has(activeInspectItem.id) && (
+                  <span className="scope-batch-note">
+                    (Active page: Page {activeInspectIndex + 1}. Note: {selectedIds.size} other{" "}
+                    {selectedIds.size === 1 ? "page is" : "pages are"} selected in batch.)
+                  </span>
+                )}
+              </div>
+
+              {hasAnyPageOverrides && (
+                <div className="scope-notice-actions">
+                  <button
+                    type="button"
+                    className="btn-reset-scope"
+                    onClick={handleResetPageSettings}
+                    title="Remove all settings overrides for this page"
+                  >
+                    Reset page settings
+                  </button>
+                </div>
               )}
             </div>
           )}
 
           {/* Setting: Page orientation */}
           <div className="setting-group">
-            <label className="setting-label">Page orientation</label>
+            <div className="setting-label-row">
+              <label className="setting-label">Page orientation</label>
+              {scopeMode === "this-page" && (
+                <div className="inheritance-status-wrap">
+                  {hasCustomOrientation ? (
+                    <>
+                      <span className="badge-custom-prop">Custom</span>
+                      <button
+                        type="button"
+                        className="btn-reset-prop"
+                        onClick={() => handleResetProperty("orientation")}
+                        title={`Use document default (${options.orientation})`}
+                      >
+                        Reset
+                      </button>
+                    </>
+                  ) : (
+                    <span className="badge-inherited-prop">
+                      Inherited ({options.orientation})
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
             <div className="segmented-control">
               <button
                 type="button"
@@ -916,7 +979,30 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
 
           {/* Setting: Page size */}
           <div className="setting-group">
-            <label className="setting-label">Page size</label>
+            <div className="setting-label-row">
+              <label className="setting-label">Page size</label>
+              {scopeMode === "this-page" && (
+                <div className="inheritance-status-wrap">
+                  {hasCustomPageSize ? (
+                    <>
+                      <span className="badge-custom-prop">Custom</span>
+                      <button
+                        type="button"
+                        className="btn-reset-prop"
+                        onClick={() => handleResetProperty("pageSize")}
+                        title={`Use document default (${options.pageSize})`}
+                      >
+                        Reset
+                      </button>
+                    </>
+                  ) : (
+                    <span className="badge-inherited-prop">
+                      Inherited ({options.pageSize})
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
             <select
               className="setting-select"
               value={currentDisplayOptions.pageSize}
@@ -935,8 +1021,31 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
 
           {/* Setting: Margins */}
           <div className="setting-group">
-            <label className="setting-label">Margins</label>
-            <div className="segmented-control">
+            <div className="setting-label-row">
+              <label className="setting-label">Margins</label>
+              {scopeMode === "this-page" && (
+                <div className="inheritance-status-wrap">
+                  {hasCustomMargins ? (
+                    <>
+                      <span className="badge-custom-prop">Custom</span>
+                      <button
+                        type="button"
+                        className="btn-reset-prop"
+                        onClick={() => handleResetProperty("marginPreset")}
+                        title={`Use document default (${options.marginPreset})`}
+                      >
+                        Reset
+                      </button>
+                    </>
+                  ) : (
+                    <span className="badge-inherited-prop">
+                      Inherited ({options.marginPreset})
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="segmented-control margin-presets-control">
               <button
                 type="button"
                 className={`segment-btn ${
@@ -957,7 +1066,18 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                   handleOptionChange("marginPreset", "Small", { marginMm: 12 })
                 }
               >
-                Small
+                Small (12mm)
+              </button>
+              <button
+                type="button"
+                className={`segment-btn ${
+                  currentDisplayOptions.marginPreset === "Medium" ? "active" : ""
+                }`}
+                onClick={() =>
+                  handleOptionChange("marginPreset", "Medium", { marginMm: 20 })
+                }
+              >
+                Medium (20mm)
               </button>
               <button
                 type="button"
@@ -969,11 +1089,120 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                 Custom
               </button>
             </div>
+
+            {/* Custom Margin Inputs in mm */}
+            {currentDisplayOptions.marginPreset === "Custom" && (
+              <div className="custom-margins-grid">
+                <label className="margin-input-field">
+                  <span>Top (mm)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={currentDisplayOptions.customMargins[0]}
+                    onChange={(e) => {
+                      const v = Math.max(0, parseInt(e.target.value, 10) || 0);
+                      const cur = [...currentDisplayOptions.customMargins] as [
+                        number,
+                        number,
+                        number,
+                        number
+                      ];
+                      cur[0] = v;
+                      handleOptionChange("customMargins", cur);
+                    }}
+                  />
+                </label>
+                <label className="margin-input-field">
+                  <span>Right (mm)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={currentDisplayOptions.customMargins[1]}
+                    onChange={(e) => {
+                      const v = Math.max(0, parseInt(e.target.value, 10) || 0);
+                      const cur = [...currentDisplayOptions.customMargins] as [
+                        number,
+                        number,
+                        number,
+                        number
+                      ];
+                      cur[1] = v;
+                      handleOptionChange("customMargins", cur);
+                    }}
+                  />
+                </label>
+                <label className="margin-input-field">
+                  <span>Bottom (mm)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={currentDisplayOptions.customMargins[2]}
+                    onChange={(e) => {
+                      const v = Math.max(0, parseInt(e.target.value, 10) || 0);
+                      const cur = [...currentDisplayOptions.customMargins] as [
+                        number,
+                        number,
+                        number,
+                        number
+                      ];
+                      cur[2] = v;
+                      handleOptionChange("customMargins", cur);
+                    }}
+                  />
+                </label>
+                <label className="margin-input-field">
+                  <span>Left (mm)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={currentDisplayOptions.customMargins[3]}
+                    onChange={(e) => {
+                      const v = Math.max(0, parseInt(e.target.value, 10) || 0);
+                      const cur = [...currentDisplayOptions.customMargins] as [
+                        number,
+                        number,
+                        number,
+                        number
+                      ];
+                      cur[3] = v;
+                      handleOptionChange("customMargins", cur);
+                    }}
+                  />
+                </label>
+              </div>
+            )}
           </div>
 
           {/* Setting: Fit image to page */}
           <div className="setting-group">
-            <label className="setting-label">Fit image to page</label>
+            <div className="setting-label-row">
+              <label className="setting-label">Fit image to page</label>
+              {scopeMode === "this-page" && (
+                <div className="inheritance-status-wrap">
+                  {hasCustomFit ? (
+                    <>
+                      <span className="badge-custom-prop">Custom</span>
+                      <button
+                        type="button"
+                        className="btn-reset-prop"
+                        onClick={() => handleResetProperty("fit")}
+                        title={`Use document default (${options.fit})`}
+                      >
+                        Reset
+                      </button>
+                    </>
+                  ) : (
+                    <span className="badge-inherited-prop">
+                      Inherited ({options.fit})
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
             <select
               className="setting-select"
               value={currentDisplayOptions.fit}
@@ -992,14 +1221,38 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
 
           {/* Setting: Image quality */}
           <div className="setting-group">
-            <label className="setting-label">Image quality</label>
+            <div className="setting-label-row">
+              <label className="setting-label">Image quality</label>
+              {scopeMode === "this-page" && (
+                <div className="inheritance-status-wrap">
+                  {hasCustomProfile ? (
+                    <>
+                      <span className="badge-custom-prop">Custom</span>
+                      <button
+                        type="button"
+                        className="btn-reset-prop"
+                        onClick={() => handleResetProperty("profile")}
+                        title={`Use document default (${options.profile})`}
+                      >
+                        Reset
+                      </button>
+                    </>
+                  ) : (
+                    <span className="badge-inherited-prop">
+                      Inherited ({options.profile})
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
             <select
               className="setting-select"
-              value={options.profile}
+              value={currentDisplayOptions.profile}
               onChange={(e) =>
-                documentSessionStore.setOptions(TOOL_ID, {
-                  profile: e.target.value as PdfOptions["profile"],
-                })
+                handleOptionChange(
+                  "profile",
+                  e.target.value as PdfOptions["profile"]
+                )
               }
             >
               <option value="Screen/Mobile">Screen / Mobile (good quality, smaller size)</option>
@@ -1008,18 +1261,36 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
             </select>
           </div>
 
-          {/* Setting: Filename */}
-          <div className="setting-group">
-            <label className="setting-label">Filename</label>
-            <input
-              type="text"
-              className="setting-input"
-              value={options.filename}
-              onChange={(e) => {
-                documentSessionStore.setOptions(TOOL_ID, { filename: e.target.value });
-              }}
-            />
-          </div>
+          {/* Explicit "Apply these settings to all pages" action when in This Page mode */}
+          {scopeMode === "this-page" && activeInspectItem && (
+            <div className="apply-all-action-wrap">
+              <button
+                type="button"
+                className="btn-apply-to-all"
+                onClick={() => setShowApplyAllModal(true)}
+              >
+                Apply these settings to all pages
+              </button>
+            </div>
+          )}
+
+          {/* Setting: Document-wide Output Filename */}
+          {scopeMode === "all" && (
+            <div className="setting-group">
+              <div className="setting-label-row">
+                <label className="setting-label">PDF Filename</label>
+                <span className="badge-doc-wide">Document-wide</span>
+              </div>
+              <input
+                type="text"
+                className="setting-input"
+                value={options.filename}
+                onChange={(e) => {
+                  documentSessionStore.setOptions(TOOL_ID, { filename: e.target.value });
+                }}
+              />
+            </div>
+          )}
 
           {/* Primary CTA: Create PDF Button */}
           <div className="sidebar-cta-group">
@@ -1087,7 +1358,66 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
         </aside>
       </div>
 
-      {/* Mobile Sticky Bottom Action Bar (Sleek single-row layout with min 44x44px touch targets) */}
+      {/* Confirmation Modal: Apply These Settings to All Pages */}
+      {showApplyAllModal && activeInspectItem && (
+        <div className="folio-modal-backdrop" role="dialog" aria-modal="true">
+          <div className="folio-modal-card confirm-modal-card">
+            <div className="modal-header">
+              <h3>Apply settings to all pages?</h3>
+              <button
+                type="button"
+                className="btn-modal-close"
+                onClick={() => setShowApplyAllModal(false)}
+                aria-label="Cancel"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <p>
+                This will apply Page {activeInspectIndex + 1}’s layout settings (page size,
+                orientation, margins, fit mode, and image quality) to all pages in this
+                document and replace any existing individual page settings.
+              </p>
+              <p className="modal-hint">
+                Individual image edits (crops, rotations, flips) will not be affected.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn-modal-cancel"
+                onClick={() => setShowApplyAllModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary-action"
+                onClick={handleConfirmApplyToAll}
+              >
+                Yes, apply to all pages
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Interactive Image Editor Modal */}
+      <ImageEditorModal
+        isOpen={!!editingItemId}
+        item={editingItem}
+        pageIndex={editingIndex}
+        totalPages={sortedItems.length}
+        onClose={() => setEditingItemId(null)}
+        onApply={(edits) => {
+          if (editingItemId) {
+            documentSessionStore.updateItemEdits(TOOL_ID, editingItemId, edits);
+          }
+        }}
+      />
+
+      {/* Mobile Sticky Bottom Action Bar */}
       <div className="mobile-bottom-bar mobile-only">
         <button
           type="button"

@@ -194,8 +194,8 @@ export function HelpModal({ isOpen, onClose, triggerRef }: ModalProps) {
               Because processing happens in device memory, sensible guardrails prevent browser crashes:
             </p>
             <ul>
-              <li><strong>Max batch size:</strong> 150 files per export</li>
-              <li><strong>Max total memory:</strong> 300 MB total file data</li>
+              <li><strong>Max batch size:</strong> 500 files per export (min 200 supported)</li>
+              <li><strong>Max total memory:</strong> 1 GB total file data</li>
               <li><strong>Max image resolution:</strong> 40 Megapixels per image (prevents canvas memory overflow)</li>
             </ul>
           </div>
