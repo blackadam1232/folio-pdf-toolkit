@@ -1110,36 +1110,38 @@ input, select, textarea {
 /* Clean White Page Card with True Miniature Paper Sheet */
 .page-card {
   background-color: #ffffff;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  padding: 10px;
+  border: 2px solid var(--border-subtle);
+  border-radius: 16px;
+  padding: 14px 14px 12px;
   display: flex;
   flex-direction: column;
   cursor: pointer;
   position: relative;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.15s ease;
   user-select: none;
   min-width: 0;
   width: 100%;
   box-sizing: border-box;
+  gap: 10px;
 }
 
 .page-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
   border-color: #c4beaf;
+  transform: translateY(-1px);
 }
 
-/* Selected Card: High contrast teal border and soft green tint */
+/* Selected Card: Orange border matching target design */
 .page-card.selected {
-  border-color: var(--color-primary);
-  background-color: #f7fbf9;
-  box-shadow: 0 0 0 2px var(--color-primary);
+  border-color: #e07020;
+  background-color: #fffaf6;
+  box-shadow: 0 0 0 2px rgba(224, 112, 32, 0.25);
 }
 
 /* Active Inspected Card in Single Page Mode: Distinct Amber Halo */
 .page-card.active-inspect {
   outline: 2px solid #d97706;
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 
 /* Both active and selected */
@@ -1148,46 +1150,46 @@ input, select, textarea {
   box-shadow: 0 0 0 2px var(--color-primary), 0 0 0 4px rgba(217, 119, 6, 0.4);
 }
 
-/* Selection Checkbox with visible checkmark and accessible touch target */
+/* Selection Checkbox — large, easy to click, orange when selected */
 .selection-check-circle {
   position: absolute;
-  top: 10px;
-  left: 10px;
-  width: 32px;
-  height: 32px;
+  top: -14px;
+  left: -14px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
-  border: 2px solid #9c9588;
-  background-color: rgba(255, 255, 255, 0.96);
+  border: 2.5px solid #b0a898;
+  background-color: rgba(255, 255, 255, 0.97);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 10;
+  z-index: 20;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.18s ease;
   padding: 0;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
 }
 
-/* Always show an expanded invisible touch target for easy clicking */
+/* Always-on expanded invisible touch target */
 .selection-check-circle::after {
   content: "";
   position: absolute;
-  top: -8px;
-  left: -8px;
-  right: -8px;
-  bottom: -8px;
+  top: -10px;
+  left: -10px;
+  right: -10px;
+  bottom: -10px;
 }
 
 .selection-check-circle:hover {
-  border-color: var(--color-primary);
-  background-color: var(--color-primary-soft);
-  transform: scale(1.08);
+  border-color: #e07020;
+  background-color: #fff4ec;
+  transform: scale(1.1);
 }
 
 .selection-check-circle.checked {
-  background-color: var(--color-primary);
-  border-color: var(--color-primary);
-  box-shadow: 0 1px 4px rgba(32, 80, 72, 0.35);
+  background-color: #e07020;
+  border-color: #e07020;
+  box-shadow: 0 2px 8px rgba(224, 112, 32, 0.45);
 }
 
 .uncheck-dot {
@@ -1195,8 +1197,8 @@ input, select, textarea {
 }
 
 .check-svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   color: #ffffff;
 }
 
@@ -1239,22 +1241,21 @@ input, select, textarea {
 /* True Miniature Paper Sheet (Contains full image without cropping) */
 .sheet-backdrop {
   width: 100%;
-  height: 180px;
-  background-color: #f2eee3;
-  border-radius: 4px;
+  height: 220px;
+  background-color: #f0ece0;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 10px;
+  padding: 14px;
   box-sizing: border-box;
-  margin-bottom: 8px;
   overflow: hidden;
 }
 
 @media (max-width: 600px) {
   .sheet-backdrop {
-    height: 150px;
-    padding: 6px;
+    height: 170px;
+    padding: 10px;
   }
 }
 
@@ -1262,8 +1263,11 @@ input, select, textarea {
   max-width: 100%;
   max-height: 100%;
   background-color: #ffffff;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.05);
-  border-radius: 1px;
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.14),
+    0 1px 4px rgba(0, 0, 0, 0.08),
+    0 0 0 1px rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
   display: flex;
   overflow: hidden;
   position: relative;
@@ -1425,26 +1429,31 @@ input, select, textarea {
 .card-meta {
   display: flex;
   align-items: baseline;
-  gap: 6px;
-  font-size: 12px;
+  gap: 8px;
+  font-size: 16px;
   min-width: 0;
   width: 100%;
   overflow: hidden;
+  padding: 2px 0 2px;
 }
 
 .card-page-num {
-  font-weight: 700;
+  font-weight: 800;
+  font-size: 18px;
   color: var(--text-main);
   flex-shrink: 0;
+  letter-spacing: -0.01em;
 }
 
 .card-filename {
-  color: var(--text-muted);
+  color: var(--color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
   flex: 1;
+  font-weight: 500;
+  font-size: 15px;
 }
 
 .card-custom-badge {
@@ -4231,35 +4240,29 @@ input, select, textarea {
 
 /* Card Quick Actions: Edit, Duplicate, Rotate */
 .card-top-actions {
-  position: absolute;
-  top: 10px;
-  right: 10px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  z-index: 10;
-}
-
-/* Add a subtle separator gap before the first icon-only button */
-.card-top-actions .btn-card-edit + .btn-card-icon-action {
-  margin-left: 4px;
+  gap: 8px;
+  width: 100%;
 }
 
 .btn-card-edit {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  background-color: rgba(255, 255, 255, 0.95);
-  border: 1px solid #d2cbbe;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  font-weight: 600;
+  gap: 6px;
+  padding: 7px 14px;
+  background-color: rgba(255, 255, 255, 0.97);
+  border: 1.5px solid #d8d0c4;
+  border-radius: 50px;
+  font-size: 13px;
+  font-weight: 700;
   color: var(--color-primary);
   cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  transition: all 0.15s ease;
-  line-height: 1.3;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  transition: all 0.18s ease;
+  line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .btn-card-edit:hover,
@@ -4267,22 +4270,23 @@ input, select, textarea {
   background-color: var(--color-primary);
   border-color: var(--color-primary);
   color: #ffffff;
+  box-shadow: 0 4px 12px rgba(32, 80, 72, 0.25);
   transform: translateY(-1px);
 }
 
 .btn-card-icon-action {
-  width: 26px;
-  height: 26px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
-  border: 1px solid #d2cbbe;
-  background-color: rgba(255, 255, 255, 0.95);
+  border: 1.5px solid #d8d0c4;
+  background-color: rgba(255, 255, 255, 0.97);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   color: var(--text-main);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  transition: all 0.15s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  transition: all 0.18s ease;
   padding: 0;
   flex-shrink: 0;
 }
@@ -4292,27 +4296,27 @@ input, select, textarea {
   background-color: var(--color-primary-soft);
   border-color: var(--color-primary);
   color: var(--color-primary);
-  transform: scale(1.08);
+  transform: scale(1.1);
+  box-shadow: 0 4px 10px rgba(32, 80, 72, 0.18);
 }
 
 .action-icon-svg {
-  width: 12px;
-  height: 12px;
+  width: 15px;
+  height: 15px;
 }
 
 @media (max-width: 768px) {
   .btn-card-edit {
-    min-height: 32px;
-    padding: 4px 10px;
-    font-size: 12px;
+    padding: 8px 16px;
+    font-size: 14px;
   }
   .btn-card-icon-action {
-    width: 32px;
-    height: 32px;
+    width: 42px;
+    height: 42px;
   }
   .action-icon-svg {
-    width: 15px;
-    height: 15px;
+    width: 17px;
+    height: 17px;
   }
 }
 
