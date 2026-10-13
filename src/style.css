@@ -1151,13 +1151,13 @@ input, select, textarea {
 /* Selection Checkbox with visible checkmark and accessible touch target */
 .selection-check-circle {
   position: absolute;
-  top: 12px;
-  left: 12px;
-  width: 24px;
-  height: 24px;
+  top: 10px;
+  left: 10px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   border: 2px solid #9c9588;
-  background-color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.96);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1165,28 +1165,29 @@ input, select, textarea {
   cursor: pointer;
   transition: all 0.15s ease;
   padding: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
 
-@media (max-width: 768px) {
-  .selection-check-circle::after {
-    content: "";
-    position: absolute;
-    top: -10px;
-    left: -10px;
-    right: -10px;
-    bottom: -10px;
-  }
+/* Always show an expanded invisible touch target for easy clicking */
+.selection-check-circle::after {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  right: -8px;
+  bottom: -8px;
 }
 
 .selection-check-circle:hover {
   border-color: var(--color-primary);
-  transform: scale(1.05);
+  background-color: var(--color-primary-soft);
+  transform: scale(1.08);
 }
 
 .selection-check-circle.checked {
   background-color: var(--color-primary);
   border-color: var(--color-primary);
-  box-shadow: 0 1px 3px rgba(32, 80, 72, 0.3);
+  box-shadow: 0 1px 4px rgba(32, 80, 72, 0.35);
 }
 
 .uncheck-dot {
@@ -1194,8 +1195,8 @@ input, select, textarea {
 }
 
 .check-svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   color: #ffffff;
 }
 
