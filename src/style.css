@@ -4235,8 +4235,13 @@ input, select, textarea {
   right: 10px;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   z-index: 10;
+}
+
+/* Add a subtle separator gap before the first icon-only button */
+.card-top-actions .btn-card-edit + .btn-card-icon-action {
+  margin-left: 4px;
 }
 
 .btn-card-edit {
@@ -4265,8 +4270,8 @@ input, select, textarea {
 }
 
 .btn-card-icon-action {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   border: 1px solid #d2cbbe;
   background-color: rgba(255, 255, 255, 0.95);
@@ -4278,6 +4283,7 @@ input, select, textarea {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   transition: all 0.15s ease;
   padding: 0;
+  flex-shrink: 0;
 }
 
 .btn-card-icon-action:hover,
