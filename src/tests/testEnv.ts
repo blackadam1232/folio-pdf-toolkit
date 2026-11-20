@@ -62,6 +62,15 @@ class MockHistory {
 }
 
 export function setupTestEnvironment() {
+  // Suppress pdfjs-dist node environment warning in test runner
+  const origWarn = console.warn;
+  console.warn = (...args: any[]) => {
+    if (typeof args[0] === "string" && args[0].includes("legacy") && args[0].includes("Node.js")) {
+      return;
+    }
+    origWarn(...args);
+  };
+
   if (typeof (globalThis as any).window === "undefined") {
     const listeners: Record<string, ((e: any) => void)[]> = {};
     const mockHistory = new MockHistory();
@@ -109,3 +118,6 @@ export function setupTestEnvironment() {
     }
   }
 }
+
+// Auto-run when loaded as test setup file
+setupTestEnvironment();
