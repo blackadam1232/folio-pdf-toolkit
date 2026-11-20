@@ -16,7 +16,6 @@ import { PageNumbersWorkspace } from "./components/PageNumbersWorkspace";
 import { WatermarkWorkspace } from "./components/WatermarkWorkspace";
 import { CompressPdfWorkspace } from "./components/CompressPdfWorkspace";
 import { PrivacyModal, HelpModal } from "./components/Modals";
-import "./style.css";
 
 export default function App() {
   const route = useRouter();
