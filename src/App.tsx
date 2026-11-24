@@ -6,16 +6,17 @@ import { useCompressionSession } from "./lib/compressionSessionStore";
 import { Header } from "./components/Header";
 import { Footer } from "./components/Footer";
 import { Homepage } from "./components/Homepage";
-import { ImagesToPdfWorkspace } from "./components/ImagesToPdfWorkspace";
-import { MergePdfWorkspace } from "./components/MergePdfWorkspace";
-import { SplitPdfWorkspace } from "./components/SplitPdfWorkspace";
-import { RotatePdfWorkspace } from "./components/RotatePdfWorkspace";
-import { PdfToImagesWorkspace } from "./components/PdfToImagesWorkspace";
-import { OrganizePdfWorkspace } from "./components/OrganizePdfWorkspace";
-import { PageNumbersWorkspace } from "./components/PageNumbersWorkspace";
-import { WatermarkWorkspace } from "./components/WatermarkWorkspace";
-import { CompressPdfWorkspace } from "./components/CompressPdfWorkspace";
 import { PrivacyModal, HelpModal } from "./components/Modals";
+
+const ImagesToPdfWorkspace = React.lazy(() => import("./components/ImagesToPdfWorkspace").then(module => ({ default: module.ImagesToPdfWorkspace })));
+const MergePdfWorkspace = React.lazy(() => import("./components/MergePdfWorkspace").then(module => ({ default: module.MergePdfWorkspace })));
+const SplitPdfWorkspace = React.lazy(() => import("./components/SplitPdfWorkspace").then(module => ({ default: module.SplitPdfWorkspace })));
+const RotatePdfWorkspace = React.lazy(() => import("./components/RotatePdfWorkspace").then(module => ({ default: module.RotatePdfWorkspace })));
+const PdfToImagesWorkspace = React.lazy(() => import("./components/PdfToImagesWorkspace").then(module => ({ default: module.PdfToImagesWorkspace })));
+const OrganizePdfWorkspace = React.lazy(() => import("./components/OrganizePdfWorkspace").then(module => ({ default: module.OrganizePdfWorkspace })));
+const PageNumbersWorkspace = React.lazy(() => import("./components/PageNumbersWorkspace").then(module => ({ default: module.PageNumbersWorkspace })));
+const WatermarkWorkspace = React.lazy(() => import("./components/WatermarkWorkspace").then(module => ({ default: module.WatermarkWorkspace })));
+const CompressPdfWorkspace = React.lazy(() => import("./components/CompressPdfWorkspace").then(module => ({ default: module.CompressPdfWorkspace })));
 
 export default function App() {
   const route = useRouter();
@@ -81,6 +82,7 @@ export default function App() {
 
       {/* Main View Router */}
       <main className="folio-main-content">
+        <React.Suspense fallback={<p className="loading-workspace" role="status">Opening workspace…</p>}>
         {route.isUnknown ? (
           <div className="folio-workspace not-found-workspace">
             <div className="empty-dropzone">
@@ -144,6 +146,7 @@ export default function App() {
             )}
           </>
         )}
+        </React.Suspense>
       </main>
 
       {/* Universal Paper Studio Footer */}

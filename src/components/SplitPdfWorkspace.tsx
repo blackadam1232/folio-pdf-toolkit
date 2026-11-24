@@ -1,6 +1,8 @@
+import { ExportResult, ProcessingPanel, useToolOutput } from "./ExportFlow";
+import { UploadZone } from "./UploadZone";
 import React, { useState, useRef } from "react";
 import JSZip from "jszip";
-import { inspectPdfFile, splitPdf, parsePageRange } from "../lib/pdfEngine";
+import { inspectPdfFile, splitPdf, parsePageRange, pageRangeError } from "../lib/pdfEngine";
 import { ScissorsIcon, PdfDocIcon } from "./Icons";
 
 interface SplitPdfWorkspaceProps {
@@ -14,8 +16,7 @@ export function SplitPdfWorkspace({ onBackToHome }: SplitPdfWorkspaceProps) {
   const [exportMode, setExportMode] = useState<"single" | "zip">("single");
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-  const [downloadName, setDownloadName] = useState("");
+  const { output, finish, edit } = useToolOutput("split-pdf");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -30,7 +31,6 @@ export function SplitPdfWorkspace({ onBackToHome }: SplitPdfWorkspaceProps) {
       setFile(selectedFile);
       setPageCount(info.pageCount);
       setRangeInput(`1-${Math.min(3, info.pageCount)}`);
-      setDownloadUrl(null);
     } catch (err) {
       setErrorMessage((err as Error).message);
     }
@@ -53,9 +53,7 @@ export function SplitPdfWorkspace({ onBackToHome }: SplitPdfWorkspaceProps) {
 
       if (exportMode === "single") {
         const blob = new Blob([singlePdf.buffer as ArrayBuffer], { type: "application/pdf" });
-        const url = URL.createObjectURL(blob);
-        setDownloadUrl(url);
-        setDownloadName(`${file.name.replace(/\.[^/.]+$/, "")}_extracted.pdf`);
+        finish({ blob, name: `${file.name.replace(/\.[^/.]+$/, "")}_extracted.pdf`, pages: indices.length });
       } else {
         // Zip mode
         const zip = new JSZip();
@@ -63,9 +61,8 @@ export function SplitPdfWorkspace({ onBackToHome }: SplitPdfWorkspaceProps) {
           zip.file(sf.name, sf.bytes);
         });
         const zipBlob = await zip.generateAsync({ type: "blob" });
-        const url = URL.createObjectURL(zipBlob);
-        setDownloadUrl(url);
-        setDownloadName(`${file.name.replace(/\.[^/.]+$/, "")}_split_pages.zip`);
+        finish({ blob: zipBlob, name: `${file.name.replace(/\.[^/.]+$/, "")}_split_pages.zip`, pages: indices.length,
+          parts: splitFiles.map(part => ({ name: part.name, blob: new Blob([part.bytes.buffer as ArrayBuffer], { type: "application/pdf" }) })) });
       }
     } catch (err) {
       setErrorMessage((err as Error).message || "Failed to split PDF.");
@@ -73,6 +70,10 @@ export function SplitPdfWorkspace({ onBackToHome }: SplitPdfWorkspaceProps) {
       setIsProcessing(false);
     }
   };
+
+  const disabledReason = file ? pageRangeError(rangeInput, pageCount) : "";
+  if (isProcessing) return <ProcessingPanel title="Extracting pages" />;
+  if (output) return <ExportResult output={output} title="Extraction ready" onEdit={edit} />;
 
   return (
     <div className="folio-workspace tool-generic-workspace">
@@ -118,26 +119,13 @@ export function SplitPdfWorkspace({ onBackToHome }: SplitPdfWorkspaceProps) {
       {errorMessage && (
         <div className="error-banner" role="alert">
           <span>⚠ {errorMessage}</span>
-          <button type="button" onClick={() => setErrorMessage("")}>✕</button>
+          <button type="button" aria-label="Dismiss error" onClick={() => setErrorMessage("")}>✕</button>
         </div>
       )}
 
       {!file ? (
-        <div
-          className="empty-dropzone"
-          onClick={() => fileInputRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            if (e.dataTransfer.files?.[0]) handleSelectFile(e.dataTransfer.files[0]);
-          }}
-        >
-          <div className="dropzone-art">
-            <ScissorsIcon className="dropzone-icon" />
-          </div>
-          <h3>Select a PDF to split</h3>
-          <p>Drag and drop a PDF here, or click to choose from your device.</p>
-        </div>
+        <UploadZone tool="split-pdf" title="Select a PDF to split" action="Choose PDF"
+          onChoose={() => fileInputRef.current?.click()} onFiles={files => { if (files[0]) handleSelectFile(files[0]); }} />
       ) : (
         <div className="tool-content-layout">
           <div className="tool-inspect-panel">
@@ -153,7 +141,7 @@ export function SplitPdfWorkspace({ onBackToHome }: SplitPdfWorkspaceProps) {
               <h4>Range Syntax Examples</h4>
               <p><code>1-3, 5, 8-10</code> — Extracts pages 1, 2, 3, 5, 8, 9, and 10.</p>
               <p><code>1</code> — Extracts only page 1.</p>
-              <p><code>2-{pageCount}</code> — Extracts from page 2 to the end of the document.</p>
+              {pageCount > 2 && <p><code>2-{pageCount}</code> — Extracts from page 2 to the end of the document.</p>}
             </div>
           </div>
 
@@ -161,15 +149,14 @@ export function SplitPdfWorkspace({ onBackToHome }: SplitPdfWorkspaceProps) {
             <h2 className="sidebar-heading">Split options</h2>
 
             <div className="setting-group">
-              <label className="setting-label">Pages to extract</label>
-              <input
+              <label className="setting-label" htmlFor="split-pdf-pages-to-extract">Pages to extract</label>
+              <input id="split-pdf-pages-to-extract"
                 type="text"
                 className="setting-input"
                 placeholder="e.g. 1-3, 5"
                 value={rangeInput}
                 onChange={(e) => {
                   setRangeInput(e.target.value);
-                  setDownloadUrl(null);
                 }}
               />
               <span className="setting-hint">Document has {pageCount} pages total.</span>
@@ -177,9 +164,10 @@ export function SplitPdfWorkspace({ onBackToHome }: SplitPdfWorkspaceProps) {
 
             <div className="setting-group">
               <label className="setting-label">Export format</label>
-              <div className="segmented-control">
+              <div className="segmented-control" role="group" aria-label="Export format">
                 <button
                   type="button"
+                  aria-pressed={exportMode === "single"}
                   className={`segment-btn ${exportMode === "single" ? "active" : ""}`}
                   onClick={() => setExportMode("single")}
                 >
@@ -187,6 +175,7 @@ export function SplitPdfWorkspace({ onBackToHome }: SplitPdfWorkspaceProps) {
                 </button>
                 <button
                   type="button"
+                  aria-pressed={exportMode === "zip"}
                   className={`segment-btn ${exportMode === "zip" ? "active" : ""}`}
                   onClick={() => setExportMode("zip")}
                 >
@@ -195,32 +184,16 @@ export function SplitPdfWorkspace({ onBackToHome }: SplitPdfWorkspaceProps) {
               </div>
             </div>
 
+            {disabledReason && <p className="field-error" role="status">{disabledReason}</p>}
             <button
               type="button"
               className="btn-create-pdf"
               onClick={handleSplit}
-              disabled={isProcessing || !rangeInput.trim()}
+              disabled={Boolean(disabledReason)}
             >
               <ScissorsIcon className="btn-pdf-icon" />
-              <span>{isProcessing ? "Extracting…" : "Extract Pages"}</span>
+              <span>Split PDF</span>
             </button>
-
-            {downloadUrl && (
-              <div className="export-result-card">
-                <div className="result-header">
-                  <span className="result-check">✓</span>
-                  <strong>Extraction Ready!</strong>
-                </div>
-                <p className="result-meta">{downloadName}</p>
-                <a
-                  href={downloadUrl}
-                  download={downloadName}
-                  className="btn-download-result text-center"
-                >
-                  Download {exportMode === "zip" ? "ZIP Archive" : "Extracted PDF"}
-                </a>
-              </div>
-            )}
           </aside>
         </div>
       )}
@@ -231,22 +204,11 @@ export function SplitPdfWorkspace({ onBackToHome }: SplitPdfWorkspaceProps) {
           <button
             type="button"
             className="btn-mobile-create-pdf"
-            onClick={downloadUrl ? () => {
-              const a = document.createElement("a");
-              a.href = downloadUrl;
-              a.download = downloadName;
-              a.click();
-            } : handleSplit}
-            disabled={isProcessing || !rangeInput.trim()}
+            onClick={handleSplit}
+            disabled={Boolean(disabledReason)}
           >
             <ScissorsIcon className="btn-pdf-icon" />
-            <span>
-              {isProcessing
-                ? "Extracting…"
-                : downloadUrl
-                ? `Download ${exportMode === "zip" ? "ZIP" : "PDF"}`
-                : "Extract Pages"}
-            </span>
+            <span>Split PDF</span>
           </button>
         </div>
       )}

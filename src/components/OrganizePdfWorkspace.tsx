@@ -1,3 +1,5 @@
+import { ExportResult, ProcessingPanel, useToolOutput } from "./ExportFlow";
+import { UploadZone } from "./UploadZone";
 import React, { useState, useRef } from "react";
 import { inspectPdfFile, organizePdfPages } from "../lib/pdfEngine";
 import { GridIcon, RotateIcon, TrashIcon, PdfDocIcon } from "./Icons";
@@ -18,10 +20,11 @@ export function OrganizePdfWorkspace({ onBackToHome }: OrganizePdfWorkspaceProps
   const [file, setFile] = useState<File | null>(null);
   const [pageCount, setPageCount] = useState<number>(0);
   const [pages, setPages] = useState<PageState[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const dragging = useRef<number | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-  const [downloadName, setDownloadName] = useState("");
+  const { output, finish, edit } = useToolOutput("organize-pdf");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -46,20 +49,18 @@ export function OrganizePdfWorkspace({ onBackToHome }: OrganizePdfWorkspaceProps
         });
       }
       setPages(initialPages);
-      setDownloadUrl(null);
+      setSelected([]);
     } catch (err) {
       setErrorMessage((err as Error).message);
     }
   };
 
-  const handleMove = (index: number, direction: "left" | "right") => {
-    const target = direction === "left" ? index - 1 : index + 1;
+  const handleMove = (index: number, target: number) => {
     if (target < 0 || target >= pages.length) return;
     const updated = [...pages];
     const [item] = updated.splice(index, 1);
     updated.splice(target, 0, item);
     setPages(updated);
-    setDownloadUrl(null);
   };
 
   const handleRotate = (id: string) => {
@@ -68,14 +69,12 @@ export function OrganizePdfWorkspace({ onBackToHome }: OrganizePdfWorkspaceProps
         p.id === id ? { ...p, rotation: (p.rotation + 90) % 360 } : p
       )
     );
-    setDownloadUrl(null);
   };
 
   const handleToggleDelete = (id: string) => {
     setPages((prev) =>
       prev.map((p) => (p.id === id ? { ...p, isDeleted: !p.isDeleted } : p))
     );
-    setDownloadUrl(null);
   };
 
   const handleExport = async () => {
@@ -100,9 +99,7 @@ export function OrganizePdfWorkspace({ onBackToHome }: OrganizePdfWorkspaceProps
       );
 
       const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      setDownloadUrl(url);
-      setDownloadName(`${file.name.replace(/\.[^/.]+$/, "")}_organized.pdf`);
+      finish({ blob, name: `${file.name.replace(/\.[^/.]+$/, "")}_organized.pdf`, pages: activePages.length });
     } catch (err) {
       setErrorMessage((err as Error).message || "Failed to organize PDF.");
     } finally {
@@ -111,6 +108,10 @@ export function OrganizePdfWorkspace({ onBackToHome }: OrganizePdfWorkspaceProps
   };
 
   const activeCount = pages.filter((p) => !p.isDeleted).length;
+
+  const disabledReason = activeCount === 0 ? "Restore at least one page to export." : "";
+  if (isProcessing) return <ProcessingPanel title="Saving changes" />;
+  if (output) return <ExportResult output={output} title="Organized PDF ready" onEdit={edit} />;
 
   return (
     <div className="folio-workspace tool-generic-workspace">
@@ -156,40 +157,35 @@ export function OrganizePdfWorkspace({ onBackToHome }: OrganizePdfWorkspaceProps
       {errorMessage && (
         <div className="error-banner" role="alert">
           <span>⚠ {errorMessage}</span>
-          <button type="button" onClick={() => setErrorMessage("")}>✕</button>
+          <button type="button" aria-label="Dismiss error" onClick={() => setErrorMessage("")}>✕</button>
         </div>
       )}
 
       {!file ? (
-        <div
-          className="empty-dropzone"
-          onClick={() => fileInputRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            if (e.dataTransfer.files?.[0]) handleSelectFile(e.dataTransfer.files[0]);
-          }}
-        >
-          <div className="dropzone-art">
-            <GridIcon className="dropzone-icon" />
-          </div>
-          <h3>Select a PDF to organize</h3>
-          <p>Drag and drop a PDF file here, or click to choose from your device.</p>
-        </div>
+        <UploadZone tool="organize-pdf" title="Select a PDF to organize" action="Choose PDF"
+          onChoose={() => fileInputRef.current?.click()} onFiles={files => { if (files[0]) handleSelectFile(files[0]); }} />
       ) : (
         <div className="tool-content-layout">
           <div className="tool-inspect-panel">
+            {selected.length > 0 && <div className="organize-toolbar" aria-label="Selected page actions">
+              <strong>{selected.length} selected</strong>
+              <button onClick={() => setPages(pages.map(page => selected.includes(page.id) ? { ...page, rotation: (page.rotation + 90) % 360 } : page))}>Rotate</button>
+              <button onClick={() => setPages(pages.map(page => selected.includes(page.id) ? { ...page, isDeleted: true } : page))}>Delete</button>
+              <button onClick={() => setPages(pages.map(page => selected.includes(page.id) ? { ...page, isDeleted: false } : page))}>Restore</button>
+              <button onClick={() => setSelected([])}>Clear selection</button>
+            </div>}
             <div className="organize-grid" role="list">
               {pages.map((p, idx) => (
                 <div
                   key={p.id}
-                  className={`organize-card ${p.isDeleted ? "deleted" : ""}`}
+                  className={`organize-card ${p.isDeleted ? "deleted" : ""} ${selected.includes(p.id) ? "is-selected" : ""}`}
+                  draggable onDragStart={() => { dragging.current = idx; }} onDragEnd={() => { dragging.current = null; }}
+                  onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); if (dragging.current !== null) handleMove(dragging.current, idx); }}
                   role="listitem"
                 >
                   <div className="organize-card-top">
-                    <span className="organize-page-tag">
-                      Page {p.originalIndex + 1}
-                    </span>
+                    <label className="organize-page-tag"><input type="checkbox" checked={selected.includes(p.id)}
+                      onChange={event => setSelected(event.target.checked ? [...selected, p.id] : selected.filter(id => id !== p.id))} />Page {p.originalIndex + 1}</label>
                     {p.isDeleted && <span className="deleted-tag">Deleted</span>}
                   </div>
 
@@ -211,7 +207,7 @@ export function OrganizePdfWorkspace({ onBackToHome }: OrganizePdfWorkspaceProps
                       type="button"
                       className="btn-card-action"
                       disabled={idx === 0}
-                      onClick={() => handleMove(idx, "left")}
+                      onClick={() => handleMove(idx, idx - 1)}
                       title="Move left"
                     >
                       ←
@@ -236,7 +232,7 @@ export function OrganizePdfWorkspace({ onBackToHome }: OrganizePdfWorkspaceProps
                       type="button"
                       className="btn-card-action"
                       disabled={idx === pages.length - 1}
-                      onClick={() => handleMove(idx, "right")}
+                      onClick={() => handleMove(idx, idx + 1)}
                       title="Move right"
                     >
                       →
@@ -257,32 +253,16 @@ export function OrganizePdfWorkspace({ onBackToHome }: OrganizePdfWorkspaceProps
               </p>
             </div>
 
+            {disabledReason && <p className="field-error" role="status">{disabledReason}</p>}
             <button
               type="button"
               className="btn-create-pdf"
               onClick={handleExport}
-              disabled={isProcessing || activeCount === 0}
+              disabled={Boolean(disabledReason)}
             >
               <GridIcon className="btn-pdf-icon" />
-              <span>{isProcessing ? "Saving…" : "Save Organized PDF"}</span>
+              <span>Save Changes</span>
             </button>
-
-            {downloadUrl && (
-              <div className="export-result-card">
-                <div className="result-header">
-                  <span className="result-check">✓</span>
-                  <strong>Organized PDF Ready!</strong>
-                </div>
-                <p className="result-meta">{downloadName} ({activeCount} pages)</p>
-                <a
-                  href={downloadUrl}
-                  download={downloadName}
-                  className="btn-download-result text-center"
-                >
-                  Download PDF
-                </a>
-              </div>
-            )}
           </aside>
         </div>
       )}
@@ -293,22 +273,11 @@ export function OrganizePdfWorkspace({ onBackToHome }: OrganizePdfWorkspaceProps
           <button
             type="button"
             className="btn-mobile-create-pdf"
-            onClick={downloadUrl ? () => {
-              const a = document.createElement("a");
-              a.href = downloadUrl;
-              a.download = downloadName;
-              a.click();
-            } : handleExport}
-            disabled={isProcessing || activeCount === 0}
+            onClick={handleExport}
+            disabled={Boolean(disabledReason)}
           >
             <GridIcon className="btn-pdf-icon" />
-            <span>
-              {isProcessing
-                ? "Saving…"
-                : downloadUrl
-                ? "Download PDF"
-                : `Save PDF (${activeCount} pgs)`}
-            </span>
+            <span>Save Changes</span>
           </button>
         </div>
       )}

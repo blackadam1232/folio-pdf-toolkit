@@ -44,7 +44,8 @@ const renderLimiter = new ConcurrencyLimiter(3);
 
 // Document LRU Cache
 interface CachedDocument {
-  doc: any;
+  doc: pdfjsLib.PDFDocumentProxy;
+  loadingTask: pdfjsLib.PDFDocumentLoadingTask;
   lastUsed: number;
 }
 const documentCache = new Map<string, CachedDocument>();
@@ -54,11 +55,14 @@ const MAX_CACHED_DOCS = 5;
 const pageRenderCache = new Map<string, RenderedPageResult>();
 const MAX_CACHED_PAGES = 120;
 
+const sourceIds = new WeakMap<File | Uint8Array, string>();
+let nextSourceId = 0;
 function getDocKey(source: File | Uint8Array): string {
-  if (source instanceof File) {
-    return `doc_file_${source.name}_${source.size}_${source.lastModified}`;
-  }
-  return `doc_bytes_${source.length}_${source[0] || 0}_${source[source.length - 1] || 0}`;
+  const existing = sourceIds.get(source);
+  if (existing) return existing;
+  const id = String(++nextSourceId);
+  sourceIds.set(source, id);
+  return id;
 }
 
 function getCacheKey(
@@ -69,7 +73,17 @@ function getCacheKey(
   return `${getDocKey(source)}_p${pageNumber}_s${scale.toFixed(2)}`;
 }
 
-async function getOrLoadPdfDocument(source: File | Uint8Array): Promise<any> {
+const pendingDocuments = new WeakMap<File | Uint8Array, Promise<pdfjsLib.PDFDocumentProxy>>();
+
+function getOrLoadPdfDocument(source: File | Uint8Array) {
+  const pending = pendingDocuments.get(source);
+  if (pending) return pending;
+  const request = loadPdfDocument(source).finally(() => pendingDocuments.delete(source));
+  pendingDocuments.set(source, request);
+  return request;
+}
+
+async function loadPdfDocument(source: File | Uint8Array): Promise<pdfjsLib.PDFDocumentProxy> {
   const docKey = getDocKey(source);
   const existing = documentCache.get(docKey);
   if (existing) {
@@ -82,7 +96,7 @@ async function getOrLoadPdfDocument(source: File | Uint8Array): Promise<any> {
     const arrayBuffer = await source.arrayBuffer();
     data = new Uint8Array(arrayBuffer);
   } else {
-    data = source;
+    data = source.slice();
   }
 
   const loadingTask = pdfjsLib.getDocument({
@@ -105,15 +119,11 @@ async function getOrLoadPdfDocument(source: File | Uint8Array): Promise<any> {
     if (oldestKey) {
       const evicted = documentCache.get(oldestKey);
       documentCache.delete(oldestKey);
-      try {
-        evicted?.doc?.destroy?.();
-      } catch (e) {
-        // ignore destroy errors
-      }
+      void evicted?.loadingTask.destroy().catch(() => {});
     }
   }
 
-  documentCache.set(docKey, { doc, lastUsed: Date.now() });
+  documentCache.set(docKey, { doc, loadingTask, lastUsed: Date.now() });
   return doc;
 }
 
@@ -217,11 +227,7 @@ export async function renderPdfPage(
 export function clearPdfRenderCache(): void {
   pageRenderCache.clear();
   for (const item of documentCache.values()) {
-    try {
-      item.doc?.destroy?.();
-    } catch (e) {
-      // ignore
-    }
+    void item.loadingTask.destroy().catch(() => {});
   }
   documentCache.clear();
 }

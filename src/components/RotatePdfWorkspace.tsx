@@ -1,5 +1,7 @@
+import { ExportResult, ProcessingPanel, useToolOutput } from "./ExportFlow";
+import { UploadZone } from "./UploadZone";
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { inspectPdfFile, rotatePdf, parsePageRange } from "../lib/pdfEngine";
+import { inspectPdfFile, rotatePdf, parsePageRange, pageRangeError } from "../lib/pdfEngine";
 import { renderPdfPage, RenderedPageResult } from "../lib/pdfRenderer";
 import { RotateIcon, PdfDocIcon } from "./Icons";
 
@@ -20,8 +22,7 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-  const [downloadName, setDownloadName] = useState("");
+  const { output, finish, edit } = useToolOutput("rotate-pdf");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -81,7 +82,6 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
       setPreviewPage(1);
       setRenderedPage(null);
       setCustomRange(`1-${info.pageCount}`);
-      setDownloadUrl(null);
     } catch (err) {
       setErrorMessage((err as Error).message);
     }
@@ -101,15 +101,17 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
 
       const rotatedBytes = await rotatePdf(file, angle, pageIndices);
       const blob = new Blob([rotatedBytes.buffer as ArrayBuffer], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      setDownloadUrl(url);
-      setDownloadName(`${file.name.replace(/\.[^/.]+$/, "")}_rotated.pdf`);
+      finish({ blob, name: `${file.name.replace(/\.[^/.]+$/, "")}_rotated.pdf`, pages: pageCount });
     } catch (err) {
       setErrorMessage((err as Error).message || "Failed to rotate PDF.");
     } finally {
       setIsProcessing(false);
     }
   };
+
+  const disabledReason = file && targetScope === "custom" ? pageRangeError(customRange, pageCount) : "";
+  if (isProcessing) return <ProcessingPanel title="Rotating pages" />;
+  if (output) return <ExportResult output={output} title="Rotated PDF ready" onEdit={edit} />;
 
   return (
     <div className="folio-workspace tool-generic-workspace">
@@ -155,26 +157,13 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
       {errorMessage && (
         <div className="error-banner" role="alert">
           <span>⚠ {errorMessage}</span>
-          <button type="button" onClick={() => setErrorMessage("")}>✕</button>
+          <button type="button" aria-label="Dismiss error" onClick={() => setErrorMessage("")}>✕</button>
         </div>
       )}
 
       {!file ? (
-        <div
-          className="empty-dropzone"
-          onClick={() => fileInputRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            if (e.dataTransfer.files?.[0]) handleSelectFile(e.dataTransfer.files[0]);
-          }}
-        >
-          <div className="dropzone-art">
-            <RotateIcon className="dropzone-icon" />
-          </div>
-          <h3>Select a PDF to rotate</h3>
-          <p>Drag and drop a PDF file here, or click to choose from your device.</p>
-        </div>
+        <UploadZone tool="rotate-pdf" title="Select a PDF to rotate" action="Choose PDF"
+          onChoose={() => fileInputRef.current?.click()} onFiles={files => { if (files[0]) handleSelectFile(files[0]); }} />
       ) : (
         <div className="tool-content-layout">
           <div className="tool-inspect-panel">
@@ -259,9 +248,10 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
 
             <div className="setting-group">
               <label className="setting-label">Angle</label>
-              <div className="segmented-control">
+              <div className="segmented-control" role="group" aria-label="Angle">
                 <button
                   type="button"
+                  aria-pressed={angle === 90}
                   className={`segment-btn ${angle === 90 ? "active" : ""}`}
                   onClick={() => setAngle(90)}
                 >
@@ -269,6 +259,7 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
                 </button>
                 <button
                   type="button"
+                  aria-pressed={angle === 180}
                   className={`segment-btn ${angle === 180 ? "active" : ""}`}
                   onClick={() => setAngle(180)}
                 >
@@ -276,6 +267,7 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
                 </button>
                 <button
                   type="button"
+                  aria-pressed={angle === 270}
                   className={`segment-btn ${angle === 270 ? "active" : ""}`}
                   onClick={() => setAngle(270)}
                 >
@@ -286,9 +278,10 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
 
             <div className="setting-group">
               <label className="setting-label">Target pages</label>
-              <div className="segmented-control">
+              <div className="segmented-control" role="group" aria-label="Target pages">
                 <button
                   type="button"
+                  aria-pressed={targetScope === "all"}
                   className={`segment-btn ${targetScope === "all" ? "active" : ""}`}
                   onClick={() => setTargetScope("all")}
                 >
@@ -296,6 +289,7 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
                 </button>
                 <button
                   type="button"
+                  aria-pressed={targetScope === "custom"}
                   className={`segment-btn ${targetScope === "custom" ? "active" : ""}`}
                   onClick={() => setTargetScope("custom")}
                 >
@@ -307,6 +301,7 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
                 <div className="custom-range-input-wrap">
                   <input
                     type="text"
+                    aria-label="Page range"
                     className="setting-input"
                     placeholder="e.g. 1, 3, 5-7"
                     value={customRange}
@@ -317,32 +312,16 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
               )}
             </div>
 
+            {disabledReason && <p className="field-error" role="status">{disabledReason}</p>}
             <button
               type="button"
               className="btn-create-pdf"
               onClick={handleRotate}
-              disabled={isProcessing}
+              disabled={Boolean(disabledReason)}
             >
               <RotateIcon className="btn-pdf-icon" />
-              <span>{isProcessing ? "Rotating…" : "Rotate PDF"}</span>
+              <span>Rotate Pages</span>
             </button>
-
-            {downloadUrl && (
-              <div className="export-result-card">
-                <div className="result-header">
-                  <span className="result-check">✓</span>
-                  <strong>Rotation Complete!</strong>
-                </div>
-                <p className="result-meta">{downloadName}</p>
-                <a
-                  href={downloadUrl}
-                  download={downloadName}
-                  className="btn-download-result text-center"
-                >
-                  Download Rotated PDF
-                </a>
-              </div>
-            )}
           </aside>
         </div>
       )}
@@ -353,22 +332,11 @@ export function RotatePdfWorkspace({ onBackToHome }: RotatePdfWorkspaceProps) {
           <button
             type="button"
             className="btn-mobile-create-pdf"
-            onClick={downloadUrl ? () => {
-              const a = document.createElement("a");
-              a.href = downloadUrl;
-              a.download = downloadName;
-              a.click();
-            } : handleRotate}
-            disabled={isProcessing}
+            onClick={handleRotate}
+            disabled={Boolean(disabledReason)}
           >
             <RotateIcon className="btn-pdf-icon" />
-            <span>
-              {isProcessing
-                ? "Rotating…"
-                : downloadUrl
-                ? "Download Rotated PDF"
-                : `Rotate (${angle}°)`}
-            </span>
+            <span>Rotate Pages</span>
           </button>
         </div>
       )}

@@ -1,3 +1,5 @@
+import { ExportResult, ProcessingPanel, useToolOutput } from "./ExportFlow";
+import { UploadZone } from "./UploadZone";
 import React, { useState, useRef } from "react";
 import { inspectPdfFile, mergePdfs } from "../lib/pdfEngine";
 import { MergeIcon, TrashIcon, PdfDocIcon } from "./Icons";
@@ -18,10 +20,10 @@ export function MergePdfWorkspace({ onBackToHome }: MergePdfWorkspaceProps) {
   const [files, setFiles] = useState<PdfItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [mergedBlobUrl, setMergedBlobUrl] = useState<string | null>(null);
+  const { output, finish, edit } = useToolOutput("merge-pdf");
   const [mergedFilename, setMergedFilename] = useState("merged-document.pdf");
-  const [outputSize, setOutputSize] = useState<number>(0);
 
+  const dragging = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleAddFiles = async (fileList: FileList | File[]) => {
@@ -52,23 +54,19 @@ export function MergePdfWorkspace({ onBackToHome }: MergePdfWorkspaceProps) {
 
     if (newItems.length > 0) {
       setFiles((prev) => [...prev, ...newItems]);
-      setMergedBlobUrl(null);
     }
   };
 
-  const handleMove = (index: number, direction: "up" | "down") => {
-    const targetIndex = direction === "up" ? index - 1 : index + 1;
+  const handleMove = (index: number, targetIndex: number) => {
     if (targetIndex < 0 || targetIndex >= files.length) return;
     const updated = [...files];
     const [moved] = updated.splice(index, 1);
     updated.splice(targetIndex, 0, moved);
     setFiles(updated);
-    setMergedBlobUrl(null);
   };
 
   const handleRemove = (id: string) => {
     setFiles((prev) => prev.filter((f) => f.id !== id));
-    setMergedBlobUrl(null);
   };
 
   const handleMerge = async () => {
@@ -83,9 +81,8 @@ export function MergePdfWorkspace({ onBackToHome }: MergePdfWorkspaceProps) {
     try {
       const { bytes, pageCount } = await mergePdfs(files.map((f) => f.file));
       const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      setMergedBlobUrl(url);
-      setOutputSize(blob.size);
+      const name = mergedFilename.trim() || "merged-document";
+      finish({ blob, name: /\.pdf$/i.test(name) ? name : name + ".pdf", pages: pageCount });
     } catch (err) {
       setErrorMessage((err as Error).message || "Failed to merge PDF files.");
     } finally {
@@ -93,17 +90,12 @@ export function MergePdfWorkspace({ onBackToHome }: MergePdfWorkspaceProps) {
     }
   };
 
-  const handleDownload = () => {
-    if (!mergedBlobUrl) return;
-    const a = document.createElement("a");
-    a.href = mergedBlobUrl;
-    a.download = mergedFilename.endsWith(".pdf") ? mergedFilename : `${mergedFilename}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
 
   const totalPages = files.reduce((sum, f) => sum + f.pageCount, 0);
+
+  const disabledReason = files.length < 2 ? "Add at least two PDFs to merge." : "";
+  if (isProcessing) return <ProcessingPanel title="Merging PDFs" />;
+  if (output) return <ExportResult output={output} title="Merged PDF ready" onEdit={edit} />;
 
   return (
     <div className="folio-workspace tool-generic-workspace">
@@ -148,31 +140,20 @@ export function MergePdfWorkspace({ onBackToHome }: MergePdfWorkspaceProps) {
       {errorMessage && (
         <div className="error-banner" role="alert">
           <span>⚠ {errorMessage}</span>
-          <button type="button" onClick={() => setErrorMessage("")}>✕</button>
+          <button type="button" aria-label="Dismiss error" onClick={() => setErrorMessage("")}>✕</button>
         </div>
       )}
 
       {files.length === 0 ? (
-        <div
-          className="empty-dropzone"
-          onClick={() => fileInputRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            if (e.dataTransfer.files) handleAddFiles(e.dataTransfer.files);
-          }}
-        >
-          <div className="dropzone-art">
-            <MergeIcon className="dropzone-icon" />
-          </div>
-          <h3>Select PDFs to combine</h3>
-          <p>Drag and drop PDF files here, or click to choose from your device.</p>
-        </div>
+        <UploadZone tool="merge-pdf" title="Select PDFs to combine" action="Add PDFs"
+          onChoose={() => fileInputRef.current?.click()} onFiles={handleAddFiles} />
       ) : (
         <div className="tool-content-layout">
           <div className="tool-items-list" role="list">
             {files.map((item, idx) => (
-              <div key={item.id} className="pdf-list-item" role="listitem">
+              <div key={item.id} className="pdf-list-item" role="listitem" draggable
+                onDragStart={() => { dragging.current = idx; }} onDragEnd={() => { dragging.current = null; }}
+                onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); if (dragging.current !== null) handleMove(dragging.current, idx); }}>
                 <div className="pdf-item-index">{idx + 1}</div>
                 <div className="pdf-item-icon">
                   <PdfDocIcon className="doc-icon-small" />
@@ -188,7 +169,7 @@ export function MergePdfWorkspace({ onBackToHome }: MergePdfWorkspaceProps) {
                     type="button"
                     className="btn-order-arrow"
                     disabled={idx === 0}
-                    onClick={() => handleMove(idx, "up")}
+                    onClick={() => handleMove(idx, idx - 1)}
                     aria-label="Move up"
                   >
                     ↑
@@ -197,7 +178,7 @@ export function MergePdfWorkspace({ onBackToHome }: MergePdfWorkspaceProps) {
                     type="button"
                     className="btn-order-arrow"
                     disabled={idx === files.length - 1}
-                    onClick={() => handleMove(idx, "down")}
+                    onClick={() => handleMove(idx, idx + 1)}
                     aria-label="Move down"
                   >
                     ↓
@@ -225,8 +206,8 @@ export function MergePdfWorkspace({ onBackToHome }: MergePdfWorkspaceProps) {
             </div>
 
             <div className="setting-group">
-              <label className="setting-label">Output filename</label>
-              <input
+              <label className="setting-label" htmlFor="merge-pdf-output-filename">Output filename</label>
+              <input id="merge-pdf-output-filename"
                 type="text"
                 className="setting-input"
                 value={mergedFilename}
@@ -234,34 +215,16 @@ export function MergePdfWorkspace({ onBackToHome }: MergePdfWorkspaceProps) {
               />
             </div>
 
+            {disabledReason && <p className="field-error" role="status">{disabledReason}</p>}
             <button
               type="button"
               className="btn-create-pdf"
               onClick={handleMerge}
-              disabled={isProcessing || files.length < 2}
+              disabled={Boolean(disabledReason)}
             >
               <MergeIcon className="btn-pdf-icon" />
-              <span>{isProcessing ? "Merging PDFs…" : "Merge PDFs"}</span>
+              <span>Merge PDFs</span>
             </button>
-
-            {mergedBlobUrl && (
-              <div className="export-result-card">
-                <div className="result-header">
-                  <span className="result-check">✓</span>
-                  <strong>Merged PDF Ready!</strong>
-                </div>
-                <p className="result-meta">
-                  {(outputSize / (1024 * 1024)).toFixed(2)} MB · {totalPages} pages
-                </p>
-                <button
-                  type="button"
-                  className="btn-download-result"
-                  onClick={handleDownload}
-                >
-                  Download Merged PDF
-                </button>
-              </div>
-            )}
           </aside>
         </div>
       )}
@@ -272,17 +235,11 @@ export function MergePdfWorkspace({ onBackToHome }: MergePdfWorkspaceProps) {
           <button
             type="button"
             className="btn-mobile-create-pdf"
-            onClick={mergedBlobUrl ? handleDownload : handleMerge}
-            disabled={isProcessing || files.length < 2}
+            onClick={handleMerge}
+            disabled={Boolean(disabledReason)}
           >
             <MergeIcon className="btn-pdf-icon" />
-            <span>
-              {isProcessing
-                ? "Merging…"
-                : mergedBlobUrl
-                ? "Download Merged PDF"
-                : `Merge ${files.length} PDFs`}
-            </span>
+            <span>Merge PDFs</span>
           </button>
         </div>
       )}

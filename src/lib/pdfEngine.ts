@@ -444,6 +444,11 @@ export async function mergePdfs(files: File[]): Promise<{ bytes: Uint8Array; pag
  * Parses and validates a page range expression like "1-3, 5, 8-10".
  * Returns 0-based unique page indices.
  */
+export function pageRangeError(input: string, pageCount: number): string {
+  try { parsePageRange(input, pageCount); return ""; }
+  catch (error) { return (error as Error).message; }
+}
+
 export function parsePageRange(rangeStr: string, totalPages: number): number[] {
   if (!rangeStr.trim()) {
     throw new Error("Page range expression cannot be empty.");
@@ -465,7 +470,7 @@ export function parsePageRange(rangeStr: string, totalPages: number): number[] {
       const start = parseInt(bounds[0], 10);
       const end = parseInt(bounds[1], 10);
 
-      if (isNaN(start) || isNaN(end)) {
+      if (!bounds.every(bound => /^\d+$/.test(bound)) || isNaN(start) || isNaN(end)) {
         throw new Error(`Non-numeric page range "${part}".`);
       }
       if (start < 1) {
@@ -483,7 +488,7 @@ export function parsePageRange(rangeStr: string, totalPages: number): number[] {
       }
     } else {
       const pageNum = parseInt(part, 10);
-      if (isNaN(pageNum)) {
+      if (!/^\d+$/.test(part) || isNaN(pageNum)) {
         throw new Error(`Invalid page specification "${part}". Expected a number or range.`);
       }
       if (pageNum < 1 || pageNum > totalPages) {

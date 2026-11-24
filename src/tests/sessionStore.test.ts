@@ -1,3 +1,4 @@
+import JSZip from "jszip";
 import { describe, it, expect, beforeEach } from "vitest";
 import { PDFDocument } from "pdf-lib";
 import { compressionSessionStore } from "../lib/compressionSessionStore";
@@ -126,6 +127,14 @@ describe("Compression Session Store", () => {
     expect(Object.keys(state.results).length).toBe(2);
     expect(state.zipBlob).not.toBeNull();
     expect(state.zipUrl).not.toBeNull();
+    const archive = await JSZip.loadAsync(await state.zipBlob!.arrayBuffer());
+    expect(Object.keys(archive.files)).toHaveLength(2);
+    for (const entry of Object.values(archive.files)) {
+      const doc = await PDFDocument.load(await entry.async("uint8array"));
+      expect(doc.getPageCount()).toBe(1);
+    }
+    await compressionSessionStore.addFiles([file1]);
+    expect(compressionSessionStore.getState().zipUrl).toBeNull();
+    expect(compressionSessionStore.getState().isOutdated).toBe(true);
   });
 });
-

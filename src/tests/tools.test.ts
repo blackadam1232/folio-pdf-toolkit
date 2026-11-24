@@ -66,6 +66,12 @@ describe("Page Range Parser (Split & Tool Operations)", () => {
     expect(() => parsePageRange("12", 10)).toThrow(/out of bounds/);
   });
 
+  it("rejects partial numbers and decimals instead of extracting the wrong page", () => {
+    for (const input of ["1x", "1.5", "1-2a"]) {
+      expect(() => parsePageRange(input, 3)).toThrow();
+    }
+  });
+
   it("throws for non-numeric or malformed expressions", () => {
     expect(() => parsePageRange("abc", 10)).toThrow(/Invalid page specification/);
     expect(() => parsePageRange("1-2-3", 10)).toThrow(/Invalid range segment/);

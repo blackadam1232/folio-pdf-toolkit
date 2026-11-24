@@ -20,13 +20,13 @@ export function Footer({ onOpenPrivacy, onOpenHelp, onNavigateHome }: FooterProp
             aria-label="Folio Homepage"
           >
             <FolioLogoIcon className="brand-icon" />
-            <span className="brand-name">folio</span>
+            <span className="brand-name">Folio</span>
           </button>
         </div>
 
         {/* Center Tagline */}
         <div className="footer-center">
-          <p className="footer-tagline">Simple tools. Thoughtful details.</p>
+          <p className="footer-tagline">Private, in-browser PDF tools.</p>
         </div>
 
         {/* Right Links */}

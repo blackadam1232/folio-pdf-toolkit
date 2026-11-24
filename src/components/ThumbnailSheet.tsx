@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { ImageItem, PdfOptions } from "../types";
 import { calculateGeometry } from "../lib/layout";
-import { CheckIcon, RotateIcon, EditIcon, CopyIcon } from "./Icons";
+import { CheckIcon } from "./Icons";
 
 interface ThumbnailSheetProps {
   item: ImageItem;
@@ -12,8 +12,11 @@ interface ThumbnailSheetProps {
   onToggleSelect: (id: string, e: React.MouseEvent) => void;
   onInspect: (id: string) => void;
   onEdit: (id: string) => void;
+  total: number;
+  onMove: (direction: -1 | 1) => void;
+  onRemove: () => void;
   onDuplicate: (id: string) => void;
-  onRotate?: (id: string, e: React.MouseEvent) => void;
+  onRotate?: (id: string, e?: React.MouseEvent) => void;
 }
 
 export const ThumbnailSheet: React.FC<ThumbnailSheetProps> = ({
@@ -26,31 +29,22 @@ export const ThumbnailSheet: React.FC<ThumbnailSheetProps> = ({
   onInspect,
   onEdit,
   onDuplicate,
-  onRotate,
+  onRotate, total, onMove, onRemove,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const itemOptions: PdfOptions = {
+  const itemOptions = React.useMemo((): PdfOptions => ({
     ...options,
     ...(item.customOptions || {}),
-  };
+  }), [options, item.customOptions]);
 
   // Calculate layout geometry using the exact shared engine
-  let geometry: ReturnType<typeof calculateGeometry> | null = null;
-  let layoutError = false;
-
-  try {
-    geometry = calculateGeometry({
-      imageWidth: item.width,
-      imageHeight: item.height,
-      rotation: item.rotation,
-      crop: item.crop,
-      options: itemOptions,
-    });
-  } catch {
-    layoutError = true;
-  }
-
+  const geometry = React.useMemo(() => {
+    try {
+      return calculateGeometry({ imageWidth: item.width, imageHeight: item.height, rotation: item.rotation, crop: item.crop, options: itemOptions });
+    } catch { return null; }
+  }, [item.width, item.height, item.rotation, item.crop, itemOptions]);
+  const layoutError = !geometry;
   const sheetAspect = geometry
     ? geometry.pageWidthPt / geometry.pageHeightPt
     : 210 / 297;
@@ -238,50 +232,23 @@ export const ThumbnailSheet: React.FC<ThumbnailSheetProps> = ({
         )}
       </button>
 
-      {/* Card Quick Action Bar (Edit, Duplicate, Quick Rotate) */}
-      <div className="card-top-actions">
-        <button
-          type="button"
-          className="btn-card-edit"
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit(item.id);
-          }}
-          aria-label={`Edit image ${item.name}`}
-          title="Edit image (crop, rotate, flip)"
-        >
-          <EditIcon className="action-icon-svg" />
-          <span>Edit</span>
-        </button>
-
-        <button
-          type="button"
-          className="btn-card-icon-action"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDuplicate(item.id);
-          }}
-          aria-label={`Duplicate page ${pageIndex + 1}`}
-          title="Duplicate page"
-        >
-          <CopyIcon className="action-icon-svg" />
-        </button>
-
-        {onRotate && (
-          <button
-            type="button"
-            className="btn-card-icon-action"
-            onClick={(e) => {
-              e.stopPropagation();
-              onRotate(item.id, e);
-            }}
-            aria-label={`Rotate page ${pageIndex + 1} 90° clockwise`}
-            title="Rotate 90° clockwise"
-          >
-            <RotateIcon className="action-icon-svg" />
-          </button>
-        )}
-      </div>
+      <details className="page-options" onClick={event => event.stopPropagation()}
+        onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }}
+        onKeyDown={event => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}>
+        <summary aria-label={`Actions for page ${pageIndex + 1}`}>•••</summary>
+        <div className="page-options-list" onClick={event => {
+          const menu = event.currentTarget.closest("details");
+          if (menu) { menu.open = false; menu.querySelector("summary")?.focus(); }
+        }}>
+          <button onClick={() => onInspect(item.id)}>Inspect page</button>
+          <button onClick={() => onEdit(item.id)}>Edit image</button>
+          <button onClick={() => onDuplicate(item.id)}>Duplicate</button>
+          <button onClick={() => onRotate?.(item.id)}>Rotate 90°</button>
+          <button disabled={pageIndex === 0} onClick={() => onMove(-1)}>Move earlier</button>
+          <button disabled={pageIndex + 1 === total} onClick={() => onMove(1)}>Move later</button>
+          <button onClick={onRemove}>Delete page</button>
+        </div>
+      </details>
 
       {/* Miniature Paper Sheet container */}
       <div className="sheet-backdrop">

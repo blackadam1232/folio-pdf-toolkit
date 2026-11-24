@@ -1,3 +1,4 @@
+import { useDialogFocus } from "../lib/useDialogFocus";
 import React, { useEffect, useRef, useState } from "react";
 import { router } from "../lib/router";
 
@@ -26,20 +27,13 @@ export function ExpandedPreviewModal({
 }: ExpandedPreviewModalProps) {
   const [viewMode, setViewMode] = useState<"split" | "original" | "compressed">("split");
   const [zoom, setZoom] = useState<number>(1);
-  const modalRef = useRef<HTMLDivElement | null>(null);
+  const modalRef = useDialogFocus<HTMLDivElement>(isOpen, onClose);
 
   useEffect(() => {
     if (!isOpen) return;
 
-    const previousActiveElement = document.activeElement as HTMLElement | null;
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      } else if (e.key === "ArrowLeft") {
+      if (e.key === "ArrowLeft") {
         if (currentPage > 1) {
           e.preventDefault();
           onPageChange(currentPage - 1);
@@ -54,20 +48,8 @@ export function ExpandedPreviewModal({
 
     window.addEventListener("keydown", handleKeyDown);
 
-    // Focus close button on mount
-    const closeBtn = modalRef.current?.querySelector<HTMLButtonElement>(".modal-close-btn");
-    closeBtn?.focus();
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = originalOverflow;
-      if (triggerRef?.current) {
-        triggerRef.current.focus();
-      } else if (previousActiveElement && typeof previousActiveElement.focus === "function") {
-        previousActiveElement.focus();
-      }
-    };
-  }, [isOpen, onClose, currentPage, totalPages, triggerRef]);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, currentPage, totalPages, onPageChange]);
 
   if (!isOpen) return null;
 

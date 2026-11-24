@@ -78,6 +78,18 @@ describe("Document Session Store", () => {
     expect(state.options.sort).toBe("manual");
   });
 
+  it("duplicates beside the source in the displayed manual order, including newly appended pages", () => {
+    const pages = ["1", "2", "3", "4"].map(id => createDummyItem(id, id + ".jpg"));
+    documentSessionStore.setItems(TOOL, pages);
+    documentSessionStore.setOptions(TOOL, { sort: "manual", manualOrder: ["3", "1", "2"] });
+
+    const appendedCopy = documentSessionStore.duplicateItem(TOOL, "4");
+    const reorderedCopy = documentSessionStore.duplicateItem(TOOL, "3");
+    const state = documentSessionStore.getToolState(TOOL);
+    expect(state.options.manualOrder).toEqual(["3", reorderedCopy, "1", "2", "4", appendedCopy]);
+    expect(state.activeInspectId).toBe(reorderedCopy);
+  });
+
   it("updates options and marks result outdated if result exists", () => {
     documentSessionStore.setOptions(TOOL, { pageSize: "Letter", fit: "Cover" });
     const state = documentSessionStore.getToolState(TOOL);

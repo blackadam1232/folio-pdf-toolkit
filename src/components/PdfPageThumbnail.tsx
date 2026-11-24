@@ -10,7 +10,27 @@ interface PdfPageThumbnailProps {
   alt?: string;
 }
 
-export const PdfPageThumbnail: React.FC<PdfPageThumbnailProps> = ({
+export const PdfPageThumbnail: React.FC<PdfPageThumbnailProps> = (props) => {
+  const placeholder = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    if (!placeholder.current || typeof IntersectionObserver === "undefined") {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) {
+        setVisible(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: "320px" });
+    observer.observe(placeholder.current);
+    return () => observer.disconnect();
+  }, []);
+  return visible ? <RenderedThumbnail {...props} /> : <div ref={placeholder} className="pdf-thumb-skeleton" aria-hidden="true" />;
+};
+
+const RenderedThumbnail: React.FC<PdfPageThumbnailProps> = ({
   file,
   pageNumber,
   rotation = 0,

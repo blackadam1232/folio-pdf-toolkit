@@ -1,17 +1,13 @@
+import { ExportResult, ProcessingPanel, useToolOutput } from "./ExportFlow";
+import { UploadZone } from "./UploadZone";
 import React, { useState, useRef } from "react";
 import JSZip from "jszip";
 import * as pdfjsLib from "pdfjs-dist";
-import { inspectPdfFile, parsePageRange } from "../lib/pdfEngine";
+import { inspectPdfFile, parsePageRange, pageRangeError } from "../lib/pdfEngine";
 import { ImageIcon, PdfDocIcon } from "./Icons";
 
-// Set worker source
-if (typeof window !== "undefined") {
-  try {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-  } catch (e) {
-    console.warn("Could not set external workerSrc, will fallback to inline worker if available.", e);
-  }
-}
+import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 interface PdfToImagesWorkspaceProps {
   onBackToHome: () => void;
@@ -19,7 +15,6 @@ interface PdfToImagesWorkspaceProps {
 
 interface RenderedImage {
   pageNumber: number;
-  dataUrl: string;
   blob: Blob;
   name: string;
 }
@@ -33,10 +28,9 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
   const [targetScope, setTargetScope] = useState<"all" | "custom">("all");
 
   const [isProcessing, setIsProcessing] = useState(false);
-  const [renderProgress, setRenderProgress] = useState<{ current: number; total: number } | null>(null);
+  const [renderProgress, setRenderProgress] = useState<{ completed: number; total: number } | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
-  const [renderedImages, setRenderedImages] = useState<RenderedImage[]>([]);
-  const [zipUrl, setZipUrl] = useState<string | null>(null);
+  const { output, finish, edit } = useToolOutput("pdf-to-images");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -51,8 +45,6 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
       setFile(selectedFile);
       setPageCount(info.pageCount);
       setPageRange(`1-${Math.min(5, info.pageCount)}`);
-      setRenderedImages([]);
-      setZipUrl(null);
     } catch (err) {
       setErrorMessage((err as Error).message);
     }
@@ -63,12 +55,11 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
 
     setErrorMessage("");
     setIsProcessing(true);
-    setRenderedImages([]);
-    setZipUrl(null);
 
+    let loadingTask: ReturnType<typeof pdfjsLib.getDocument> | undefined;
     try {
       const buffer = await file.arrayBuffer();
-      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+      loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
       const pdf = await loadingTask.promise;
 
       let targetPages: number[] = [];
@@ -81,11 +72,11 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
 
       const results: RenderedImage[] = [];
       const baseName = file.name.replace(/\.[^/.]+$/, "");
-      const scale = dpiProfile === 300 ? 2.5 : 1.5;
+      const scale = dpiProfile / 72;
+      setRenderProgress({ completed: 0, total: targetPages.length });
 
       for (let i = 0; i < targetPages.length; i++) {
         const pageNum = targetPages[i];
-        setRenderProgress({ current: i + 1, total: targetPages.length });
 
         const page = await pdf.getPage(pageNum);
         const viewport = page.getViewport({ scale });
@@ -107,38 +98,46 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
 
         const mime = format === "png" ? "image/png" : "image/jpeg";
         const ext = format === "png" ? "png" : "jpg";
-        const dataUrl = canvas.toDataURL(mime, 0.9);
+
 
         const blob = await new Promise<Blob>((resolve, reject) => {
           canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Failed to export image blob"))), mime, 0.9);
         });
 
+        canvas.width = 0;
+        canvas.height = 0;
+        page.cleanup();
         results.push({
           pageNumber: pageNum,
-          dataUrl,
           blob,
           name: `${baseName}_page_${pageNum}.${ext}`,
         });
+        setRenderProgress({ completed: i + 1, total: targetPages.length });
       }
 
-      setRenderedImages(results);
-
-      // Also generate a zip archive if more than 1 image
-      if (results.length > 1) {
-        const zip = new JSZip();
-        results.forEach((img) => {
-          zip.file(img.name, img.blob);
-        });
-        const zipBlob = await zip.generateAsync({ type: "blob" });
-        setZipUrl(URL.createObjectURL(zipBlob));
-      }
+      const zip = new JSZip();
+      for (const image of results) zip.file(image.name, image.blob);
+      const blob = await zip.generateAsync({ type: "blob" });
+      finish({ blob, name: baseName + "_images.zip", pages: results.length, parts: results });
     } catch (err) {
       setErrorMessage((err as Error).message || "Failed to render PDF to images.");
     } finally {
+      await loadingTask?.destroy().catch(() => {});
       setIsProcessing(false);
       setRenderProgress(null);
     }
   };
+
+  const disabledReason = file && targetScope === "custom" ? pageRangeError(pageRange, pageCount) : "";
+  if (isProcessing) {
+    if (renderProgress && renderProgress.completed === renderProgress.total) {
+      return <ProcessingPanel title="Preparing ZIP" detail="Packaging the converted page images…" />;
+    }
+    return <ProcessingPanel title="Converting pages"
+      detail={renderProgress ? `Rendering page ${renderProgress.completed + 1} of ${renderProgress.total}` : undefined}
+      percent={renderProgress ? renderProgress.completed / renderProgress.total * 100 : undefined} />;
+  }
+  if (output) return <ExportResult output={output} title="Page images ready" onEdit={edit} downloadLabel="Download All Images (ZIP)" />;
 
   return (
     <div className="folio-workspace tool-generic-workspace">
@@ -184,26 +183,13 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
       {errorMessage && (
         <div className="error-banner" role="alert">
           <span>⚠ {errorMessage}</span>
-          <button type="button" onClick={() => setErrorMessage("")}>✕</button>
+          <button type="button" aria-label="Dismiss error" onClick={() => setErrorMessage("")}>✕</button>
         </div>
       )}
 
       {!file ? (
-        <div
-          className="empty-dropzone"
-          onClick={() => fileInputRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            if (e.dataTransfer.files?.[0]) handleSelectFile(e.dataTransfer.files[0]);
-          }}
-        >
-          <div className="dropzone-art">
-            <ImageIcon className="dropzone-icon" />
-          </div>
-          <h3>Select a PDF to extract images</h3>
-          <p>Drag and drop a PDF file here, or click to choose from your device.</p>
-        </div>
+        <UploadZone tool="pdf-to-images" title="Select a PDF to extract images" action="Choose PDF"
+          onChoose={() => fileInputRef.current?.click()} onFiles={files => { if (files[0]) handleSelectFile(files[0]); }} />
       ) : (
         <div className="tool-content-layout">
           <div className="tool-inspect-panel">
@@ -215,21 +201,6 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
               </div>
             </div>
 
-            {renderedImages.length > 0 && (
-              <div className="extracted-images-grid">
-                {renderedImages.map((img) => (
-                  <div key={img.pageNumber} className="extracted-image-card">
-                    <img src={img.dataUrl} alt={`Page ${img.pageNumber}`} className="extracted-thumb" />
-                    <div className="extracted-card-footer">
-                      <span>Page {img.pageNumber}</span>
-                      <a href={img.dataUrl} download={img.name} className="btn-save-single">
-                        Save
-                      </a>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
 
           <aside className="tool-settings-sidebar">
@@ -237,9 +208,10 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
 
             <div className="setting-group">
               <label className="setting-label">Format</label>
-              <div className="segmented-control">
+              <div className="segmented-control" role="group" aria-label="Format">
                 <button
                   type="button"
+                  aria-pressed={format === "jpeg"}
                   className={`segment-btn ${format === "jpeg" ? "active" : ""}`}
                   onClick={() => setFormat("jpeg")}
                 >
@@ -247,6 +219,7 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
                 </button>
                 <button
                   type="button"
+                  aria-pressed={format === "png"}
                   className={`segment-btn ${format === "png" ? "active" : ""}`}
                   onClick={() => setFormat("png")}
                 >
@@ -256,8 +229,8 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
             </div>
 
             <div className="setting-group">
-              <label className="setting-label">Resolution profile</label>
-              <select
+              <label className="setting-label" htmlFor="pdf-to-images-resolution-profile">Resolution profile</label>
+              <select id="pdf-to-images-resolution-profile"
                 className="setting-select"
                 value={dpiProfile}
                 onChange={(e) => setDpiProfile(Number(e.target.value) as any)}
@@ -269,9 +242,10 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
 
             <div className="setting-group">
               <label className="setting-label">Pages</label>
-              <div className="segmented-control">
+              <div className="segmented-control" role="group" aria-label="Pages">
                 <button
                   type="button"
+                  aria-pressed={targetScope === "all"}
                   className={`segment-btn ${targetScope === "all" ? "active" : ""}`}
                   onClick={() => setTargetScope("all")}
                 >
@@ -279,6 +253,7 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
                 </button>
                 <button
                   type="button"
+                  aria-pressed={targetScope === "custom"}
                   className={`segment-btn ${targetScope === "custom" ? "active" : ""}`}
                   onClick={() => setTargetScope("custom")}
                 >
@@ -290,6 +265,7 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
                 <div className="custom-range-input-wrap">
                   <input
                     type="text"
+                    aria-label="Page range"
                     className="setting-input"
                     placeholder="e.g. 1-3, 5"
                     value={pageRange}
@@ -300,35 +276,16 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
               )}
             </div>
 
+            {disabledReason && <p className="field-error" role="status">{disabledReason}</p>}
             <button
               type="button"
               className="btn-create-pdf"
               onClick={handleConvert}
-              disabled={isProcessing}
+              disabled={Boolean(disabledReason)}
             >
               <ImageIcon className="btn-pdf-icon" />
-              <span>
-                {isProcessing
-                  ? `Rendering ${renderProgress?.current || 0}/${renderProgress?.total || pageCount}…`
-                  : "Convert to Images"}
-              </span>
+              <span>Convert to Images</span>
             </button>
-
-            {zipUrl && (
-              <div className="export-result-card">
-                <div className="result-header">
-                  <span className="result-check">✓</span>
-                  <strong>{renderedImages.length} Images Ready!</strong>
-                </div>
-                <a
-                  href={zipUrl}
-                  download={`${file.name.replace(/\.[^/.]+$/, "")}_images.zip`}
-                  className="btn-download-result text-center"
-                >
-                  Download All as ZIP
-                </a>
-              </div>
-            )}
           </aside>
         </div>
       )}
@@ -339,22 +296,11 @@ export function PdfToImagesWorkspace({ onBackToHome }: PdfToImagesWorkspaceProps
           <button
             type="button"
             className="btn-mobile-create-pdf"
-            onClick={zipUrl ? () => {
-              const a = document.createElement("a");
-              a.href = zipUrl;
-              a.download = `${file.name.replace(/\.[^/.]+$/, "")}_images.zip`;
-              a.click();
-            } : handleConvert}
-            disabled={isProcessing}
+            onClick={handleConvert}
+            disabled={Boolean(disabledReason)}
           >
             <ImageIcon className="btn-pdf-icon" />
-            <span>
-              {isProcessing
-                ? "Rendering…"
-                : zipUrl
-                ? "Download ZIP"
-                : "Convert to Images"}
-            </span>
+            <span>Convert to Images</span>
           </button>
         </div>
       )}

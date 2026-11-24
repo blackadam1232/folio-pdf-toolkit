@@ -1,5 +1,7 @@
+import { ExportResult, ProcessingPanel, useToolOutput } from "./ExportFlow";
+import { UploadZone } from "./UploadZone";
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { inspectPdfFile, addPageNumbersToPdf, parsePageRange } from "../lib/pdfEngine";
+import { inspectPdfFile, addPageNumbersToPdf, parsePageRange, pageRangeError } from "../lib/pdfEngine";
 import { renderPdfPage, RenderedPageResult } from "../lib/pdfRenderer";
 import { NumberIcon, PdfDocIcon } from "./Icons";
 import { PageNumberPosition } from "../types";
@@ -14,7 +16,7 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
   const [position, setPosition] = useState<PageNumberPosition>("bottom-center");
   const [format, setFormat] = useState<"number" | "page-x-of-y">("page-x-of-y");
   const [startNumber, setStartNumber] = useState<number>(1);
-  const [fontSize, setFontSize] = useState<number>(10);
+  const fontSize = 10;
   const [pageRange, setPageRange] = useState<string>("");
   const [targetScope, setTargetScope] = useState<"all" | "custom">("all");
 
@@ -24,8 +26,7 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-  const [downloadName, setDownloadName] = useState("");
+  const { output, finish, edit } = useToolOutput("page-numbers");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -96,7 +97,6 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
       setPreviewPage(1);
       setRenderedPage(null);
       setPageRange(`1-${info.pageCount}`);
-      setDownloadUrl(null);
     } catch (err) {
       setErrorMessage((err as Error).message);
     }
@@ -122,15 +122,17 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
       });
 
       const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      setDownloadUrl(url);
-      setDownloadName(`${file.name.replace(/\.[^/.]+$/, "")}_numbered.pdf`);
+      finish({ blob, name: `${file.name.replace(/\.[^/.]+$/, "")}_numbered.pdf`, pages: pageCount });
     } catch (err) {
       setErrorMessage((err as Error).message || "Failed to add page numbers.");
     } finally {
       setIsProcessing(false);
     }
   };
+
+  const disabledReason = file && targetScope === "custom" ? pageRangeError(pageRange, pageCount) : "";
+  if (isProcessing) return <ProcessingPanel title="Adding page numbers" />;
+  if (output) return <ExportResult output={output} title="Numbered PDF ready" onEdit={edit} />;
 
   return (
     <div className="folio-workspace tool-generic-workspace">
@@ -176,26 +178,13 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
       {errorMessage && (
         <div className="error-banner" role="alert">
           <span>⚠ {errorMessage}</span>
-          <button type="button" onClick={() => setErrorMessage("")}>✕</button>
+          <button type="button" aria-label="Dismiss error" onClick={() => setErrorMessage("")}>✕</button>
         </div>
       )}
 
       {!file ? (
-        <div
-          className="empty-dropzone"
-          onClick={() => fileInputRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            if (e.dataTransfer.files?.[0]) handleSelectFile(e.dataTransfer.files[0]);
-          }}
-        >
-          <div className="dropzone-art">
-            <NumberIcon className="dropzone-icon" />
-          </div>
-          <h3>Select a PDF for page numbers</h3>
-          <p>Drag and drop a PDF file here, or click to choose from your device.</p>
-        </div>
+        <UploadZone tool="page-numbers" title="Select a PDF for page numbers" action="Choose PDF"
+          onChoose={() => fileInputRef.current?.click()} onFiles={files => { if (files[0]) handleSelectFile(files[0]); }} />
       ) : (
         <div className="tool-content-layout">
           <div className="tool-inspect-panel">
@@ -290,9 +279,10 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
 
             <div className="setting-group">
               <label className="setting-label">Format</label>
-              <div className="segmented-control">
+              <div className="segmented-control" role="group" aria-label="Format">
                 <button
                   type="button"
+                  aria-pressed={format === "page-x-of-y"}
                   className={`segment-btn ${format === "page-x-of-y" ? "active" : ""}`}
                   onClick={() => setFormat("page-x-of-y")}
                 >
@@ -300,6 +290,7 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
                 </button>
                 <button
                   type="button"
+                  aria-pressed={format === "number"}
                   className={`segment-btn ${format === "number" ? "active" : ""}`}
                   onClick={() => setFormat("number")}
                 >
@@ -309,8 +300,8 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
             </div>
 
             <div className="setting-group">
-              <label className="setting-label">Position</label>
-              <select
+              <label className="setting-label" htmlFor="page-numbers-position">Position</label>
+              <select id="page-numbers-position"
                 className="setting-select"
                 value={position}
                 onChange={(e) => setPosition(e.target.value as PageNumberPosition)}
@@ -323,8 +314,8 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
             </div>
 
             <div className="setting-group">
-              <label className="setting-label">Starting number</label>
-              <input
+              <label className="setting-label" htmlFor="page-numbers-starting-number">Starting number</label>
+              <input id="page-numbers-starting-number"
                 type="number"
                 min="1"
                 className="setting-input"
@@ -335,9 +326,10 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
 
             <div className="setting-group">
               <label className="setting-label">Pages</label>
-              <div className="segmented-control">
+              <div className="segmented-control" role="group" aria-label="Pages">
                 <button
                   type="button"
+                  aria-pressed={targetScope === "all"}
                   className={`segment-btn ${targetScope === "all" ? "active" : ""}`}
                   onClick={() => setTargetScope("all")}
                 >
@@ -345,6 +337,7 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
                 </button>
                 <button
                   type="button"
+                  aria-pressed={targetScope === "custom"}
                   className={`segment-btn ${targetScope === "custom" ? "active" : ""}`}
                   onClick={() => setTargetScope("custom")}
                 >
@@ -356,6 +349,7 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
                 <div className="custom-range-input-wrap">
                   <input
                     type="text"
+                    aria-label="Page range"
                     className="setting-input"
                     placeholder="e.g. 1-10"
                     value={pageRange}
@@ -365,32 +359,16 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
               )}
             </div>
 
+            {disabledReason && <p className="field-error" role="status">{disabledReason}</p>}
             <button
               type="button"
               className="btn-create-pdf"
               onClick={handleApplyNumbers}
-              disabled={isProcessing}
+              disabled={Boolean(disabledReason)}
             >
               <NumberIcon className="btn-pdf-icon" />
-              <span>{isProcessing ? "Adding Numbers…" : "Add Page Numbers"}</span>
+              <span>Apply Page Numbers</span>
             </button>
-
-            {downloadUrl && (
-              <div className="export-result-card">
-                <div className="result-header">
-                  <span className="result-check">✓</span>
-                  <strong>Numbered PDF Ready!</strong>
-                </div>
-                <p className="result-meta">{downloadName}</p>
-                <a
-                  href={downloadUrl}
-                  download={downloadName}
-                  className="btn-download-result text-center"
-                >
-                  Download Numbered PDF
-                </a>
-              </div>
-            )}
           </aside>
         </div>
       )}
@@ -401,22 +379,11 @@ export function PageNumbersWorkspace({ onBackToHome }: PageNumbersWorkspaceProps
           <button
             type="button"
             className="btn-mobile-create-pdf"
-            onClick={downloadUrl ? () => {
-              const a = document.createElement("a");
-              a.href = downloadUrl;
-              a.download = downloadName;
-              a.click();
-            } : handleApplyNumbers}
-            disabled={isProcessing}
+            onClick={handleApplyNumbers}
+            disabled={Boolean(disabledReason)}
           >
             <NumberIcon className="btn-pdf-icon" />
-            <span>
-              {isProcessing
-                ? "Numbering…"
-                : downloadUrl
-                ? "Download Numbered PDF"
-                : "Add Page Numbers"}
-            </span>
+            <span>Apply Page Numbers</span>
           </button>
         </div>
       )}

@@ -1,3 +1,6 @@
+import { UploadZone } from "./UploadZone";
+import { ExportResult, ProcessingPanel, formatBytes } from "./ExportFlow";
+import { useDialogFocus } from "../lib/useDialogFocus";
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   ConversionResult,
@@ -65,8 +68,8 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState<boolean>(false);
   const [isLoadingSamples, setIsLoadingSamples] = useState<boolean>(false);
   const [singleZoom, setSingleZoom] = useState<number>(1);
-  const [fitMode, setFitMode] = useState<"page" | "width" | "custom">("page");
   const [jumpPageInput, setJumpPageInput] = useState<string>("1");
+  const removedOrder = useRef<string[]>([]);
   const [undoStack, setUndoStack] = useState<ImageItem[] | null>(null);
   const [undoMessage, setUndoMessage] = useState<string>("");
 
@@ -76,6 +79,14 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
   // Apply to all pages confirmation modal
   const [showApplyAllModal, setShowApplyAllModal] = useState<boolean>(false);
 
+  const settingsPanel = useDialogFocus<HTMLElement>(mobileSettingsOpen && !showApplyAllModal, () => setMobileSettingsOpen(false));
+  const confirmPanel = useDialogFocus<HTMLDivElement>(showApplyAllModal, () => setShowApplyAllModal(false));
+  useEffect(() => {
+    const mobile = window.matchMedia("(max-width: 768px)");
+    const closeOnDesktop = () => { if (!mobile.matches) setMobileSettingsOpen(false); };
+    mobile.addEventListener("change", closeOnDesktop);
+    return () => mobile.removeEventListener("change", closeOnDesktop);
+  }, []);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Sorted items based on active sort options
@@ -176,6 +187,17 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     setShowApplyAllModal(false);
   };
 
+  function appendImages(incoming: ImageItem[]) {
+    const current = documentSessionStore.getToolState(TOOL_ID).items;
+    const combined = [...current, ...incoming];
+    if (combined.length > MAX_FILES_LIMIT || combined.reduce((sum, item) => sum + item.size, 0) > MAX_TOTAL_BYTES_LIMIT) {
+      incoming.forEach(item => URL.revokeObjectURL(item.objectUrl));
+      setErrorMessage("This selection exceeds the document's image count or size limit.");
+      return;
+    }
+    documentSessionStore.setItems(TOOL_ID, combined);
+  }
+
   // Add files
   const handleAddFiles = async (fileList: FileList | File[]) => {
     const incoming = Array.from(fileList);
@@ -227,12 +249,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
       setErrorMessage(errors.join(" · "));
     }
 
-    if (newItems.length > 0) {
-      documentSessionStore.setItems(TOOL_ID, [...items, ...newItems]);
-      if (!activeInspectId && newItems[0]) {
-        documentSessionStore.setActiveInspectId(TOOL_ID, newItems[0].id);
-      }
-    }
+    if (newItems.length) appendImages(newItems);
   };
 
   // Load sample photos
@@ -241,10 +258,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     setErrorMessage("");
     try {
       const sampleItems = await loadSampleSet();
-      documentSessionStore.setItems(TOOL_ID, [...items, ...sampleItems]);
-      if (!activeInspectId && sampleItems[0]) {
-        documentSessionStore.setActiveInspectId(TOOL_ID, sampleItems[0].id);
-      }
+      appendImages(sampleItems);
     } catch (err) {
       setErrorMessage("Could not load sample photos.");
     } finally {
@@ -322,6 +336,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
   const handleRemoveSelected = () => {
     if (!selectedIds.size) return;
     const toRemove = items.filter((it) => selectedIds.has(it.id));
+    removedOrder.current = items.map(item => item.id);
     setUndoStack(toRemove);
     setUndoMessage(`${toRemove.length} page${toRemove.length === 1 ? "" : "s"} removed.`);
     documentSessionStore.removeSelected(TOOL_ID);
@@ -330,7 +345,11 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
   // Undo removal
   const handleUndo = () => {
     if (undoStack && undoStack.length > 0) {
-      documentSessionStore.setItems(TOOL_ID, [...items, ...undoStack]);
+      const restored = [...items];
+      for (const item of undoStack) {
+        restored.splice(removedOrder.current.indexOf(item.id), 0, { ...item, objectUrl: URL.createObjectURL(item.file) });
+      }
+      documentSessionStore.setItems(TOOL_ID, restored);
       setUndoStack(null);
       setUndoMessage("");
     }
@@ -366,10 +385,14 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     router.navigate({ toolId: TOOL_ID, stage: "processing" });
 
     const res = await documentSessionStore.startGeneration(TOOL_ID);
-    if (res) {
-      router.navigate({ toolId: TOOL_ID, stage: "result", replace: true });
-      setMobileSettingsOpen(false);
+    if (router.getRoute().toolId !== TOOL_ID || router.getRoute().stage !== "processing") return;
+    if (!res) {
+      setErrorMessage(documentSessionStore.getToolState(TOOL_ID).errorMessage);
+      router.navigate({ toolId: TOOL_ID, stage: "editor", replace: true });
+      return;
     }
+    router.navigate({ toolId: TOOL_ID, stage: "result", replace: true });
+    setMobileSettingsOpen(false);
   };
 
   // Cancel Generation
@@ -380,7 +403,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
 
   // Download PDF
   const handleDownload = () => {
-    if (!result) return;
+    if (!result || session.isOutdated) return;
     const a = document.createElement("a");
     a.href = result.url;
     a.download = result.filename;
@@ -410,6 +433,11 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     activeInspectItem?.customOptions &&
     Object.keys(activeInspectItem.customOptions).length > 0;
 
+  if (isProcessing && route.stage === "processing") return <ProcessingPanel title="Creating your PDF" detail={progress?.currentFilename} percent={progress?.percent} onCancel={handleCancelGeneration} />;
+  if (route.stage === "result" && result && !session.isOutdated) return <ExportResult
+    title="Your PDF is ready" output={{ blob: result.blob, name: result.filename, pages: result.pageCount }}
+    onEdit={() => router.navigate({ toolId: TOOL_ID, stage: "editor", replace: true })} />;
+
   return (
     <div className="folio-workspace images-workspace">
       {/* Hidden File Input */}
@@ -425,10 +453,22 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
         }}
       />
 
+      {items.length === 0 ? <>
+        <div className="tool-workspace-header"><div><h1 className="document-title">Images to PDF</h1><p className="tool-header-subtitle">Arrange images into pages and choose how they fit.</p></div></div>
+        {errorMessage && <p className="error-banner" role="alert">{errorMessage}</p>}
+        <UploadZone tool="images-to-pdf" title="Convert images to a PDF" action="Add images" formats="JPEG · PNG · WebP"
+          onChoose={() => fileInputRef.current?.click()} onFiles={handleAddFiles}>
+          <button className="sample-action" onClick={handleLoadSamples} disabled={isLoadingSamples}>{isLoadingSamples ? "Loading sample…" : "Try the sample photos"}</button>
+        </UploadZone>
+        {undoStack && <button className="return-action" onClick={handleUndo}>Undo removal</button>}
+      </> : <>
       {/* Main Workspace Layout */}
       <div className="workspace-layout">
         {/* Main Content Area */}
-        <div className="workspace-main-col">
+        <div className="workspace-main-col" onDragOver={event => event.preventDefault()} onDrop={event => {
+          event.preventDefault();
+          if (event.dataTransfer.files.length && !isProcessing) handleAddFiles(event.dataTransfer.files);
+        }}>
           {/* Main Title Area */}
           <div className="workspace-title-bar">
             <div className="title-left-group">
@@ -440,7 +480,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
               >
                 ← All tools
               </button>
-              <h1 className="document-title">Your document</h1>
+              <h1 className="document-title">Images to PDF</h1>
               <span className="document-page-badge">
                 {sortedItems.length} {sortedItems.length === 1 ? "page" : "pages"}
               </span>
@@ -625,33 +665,6 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
           {/* VIEW MODE: OVERVIEW GRID */}
           {viewMode === "overview" && (
             <div className="overview-container">
-              {sortedItems.length === 0 ? (
-                <div className="empty-dropzone">
-                  <div className="dropzone-illustration">
-                    <PdfDocIcon className="empty-icon-svg" />
-                  </div>
-                  <h3>No images added yet</h3>
-                  <p className="empty-hint">
-                    Add JPG, PNG, or WebP images to convert them into a professional PDF.
-                  </p>
-                  <button
-                    type="button"
-                    className="btn-primary-action"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    Select Images from Device
-                  </button>
-                  <div className="empty-divider">or</div>
-                  <button
-                    type="button"
-                    className="btn-sample-load"
-                    onClick={handleLoadSamples}
-                    disabled={isLoadingSamples}
-                  >
-                    {isLoadingSamples ? "Loading samples…" : "Load 20 Travel Photos Sample"}
-                  </button>
-                </div>
-              ) : (
                 <div className="page-grid" role="list" aria-label="Document Pages">
                   {sortedItems.map((item, idx) => (
                     <ThumbnailSheet
@@ -664,6 +677,19 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                       onToggleSelect={(id, e) => toggleSelection(id, e)}
                       onInspect={(id) => {
                         documentSessionStore.setActiveInspectId(TOOL_ID, id);
+                        documentSessionStore.setViewMode(TOOL_ID, "single");
+                      }}
+                      total={sortedItems.length}
+                      onMove={direction => {
+                        const order = [...sortedItems];
+                        const target = idx + direction;
+                        [order[idx], order[target]] = [order[target], order[idx]];
+                        documentSessionStore.setOptions(TOOL_ID, { sort: "manual", manualOrder: order.map(page => page.id) });
+                      }}
+                      onRemove={() => {
+                        removedOrder.current = items.map(page => page.id);
+                        setUndoStack([item]); setUndoMessage("Page removed.");
+                        documentSessionStore.removeItem(TOOL_ID, item.id);
                       }}
                       onEdit={(id) => {
                         setEditingItemId(id);
@@ -675,16 +701,15 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                     />
                   ))}
                 </div>
-              )}
 
               {/* Status bar below grid */}
               {sortedItems.length > 0 && (
                 <div className="grid-footer-bar">
                   <span className="grid-status-count">
-                    Showing pages 1 – {sortedItems.length} of {sortedItems.length}
+                    {sortedItems.length} pages · {formatBytes(items.reduce((sum, item) => sum + item.size, 0))}
                   </span>
                   <span className="grid-status-hint desktop-only">
-                    Click Edit on any card to crop, rotate, or flip. Click a card to customize its page settings.
+                    Use the page menu to edit, duplicate or move a page.
                   </span>
                 </div>
               )}
@@ -761,13 +786,9 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                 </div>
 
                 {/* Accurate layout preview */}
-                <div
-                  className="paper-sheet-preview-wrap"
-                  style={{
-                    transform: `scale(${singleZoom})`,
-                  }}
-                >
+                <div className="paper-sheet-preview-wrap">
                   <PreviewCanvas
+                    zoom={singleZoom}
                     item={activeInspectItem}
                     options={options}
                     pageIndex={activeInspectIndex}
@@ -808,7 +829,6 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                     type="button"
                     onClick={() => {
                       setSingleZoom(1);
-                      setFitMode("page");
                     }}
                     title="Reset to 100%"
                   >
@@ -830,6 +850,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
 
         {/* Right Settings Sidebar (Desktop & Mobile Drawer) */}
         <aside
+          ref={settingsPanel} role={mobileSettingsOpen ? "dialog" : undefined} aria-modal={mobileSettingsOpen || undefined}
           className={`workspace-sidebar ${
             mobileSettingsOpen ? "mobile-drawer-open" : ""
           }`}
@@ -949,7 +970,8 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
             <div className="segmented-control">
               <button
                 type="button"
-                className={`segment-btn ${
+                aria-pressed={currentDisplayOptions.orientation === "Portrait"}
+                  className={`segment-btn ${
                   currentDisplayOptions.orientation === "Portrait" ? "active" : ""
                 }`}
                 onClick={() => handleOptionChange("orientation", "Portrait")}
@@ -958,7 +980,8 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
               </button>
               <button
                 type="button"
-                className={`segment-btn ${
+                aria-pressed={currentDisplayOptions.orientation === "Landscape"}
+                  className={`segment-btn ${
                   currentDisplayOptions.orientation === "Landscape" ? "active" : ""
                 }`}
                 onClick={() => handleOptionChange("orientation", "Landscape")}
@@ -967,7 +990,8 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
               </button>
               <button
                 type="button"
-                className={`segment-btn ${
+                aria-pressed={currentDisplayOptions.orientation === "Auto"}
+                  className={`segment-btn ${
                   currentDisplayOptions.orientation === "Auto" ? "active" : ""
                 }`}
                 onClick={() => handleOptionChange("orientation", "Auto")}
@@ -1004,7 +1028,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
               )}
             </div>
             <select
-              className="setting-select"
+              aria-label="pageSize" className="setting-select"
               value={currentDisplayOptions.pageSize}
               onChange={(e) =>
                 handleOptionChange(
@@ -1048,7 +1072,8 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
             <div className="segmented-control margin-presets-control">
               <button
                 type="button"
-                className={`segment-btn ${
+                aria-pressed={currentDisplayOptions.marginPreset === "None"}
+                  className={`segment-btn ${
                   currentDisplayOptions.marginPreset === "None" ? "active" : ""
                 }`}
                 onClick={() =>
@@ -1059,7 +1084,8 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
               </button>
               <button
                 type="button"
-                className={`segment-btn ${
+                aria-pressed={currentDisplayOptions.marginPreset === "Small"}
+                  className={`segment-btn ${
                   currentDisplayOptions.marginPreset === "Small" ? "active" : ""
                 }`}
                 onClick={() =>
@@ -1070,7 +1096,8 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
               </button>
               <button
                 type="button"
-                className={`segment-btn ${
+                aria-pressed={currentDisplayOptions.marginPreset === "Medium"}
+                  className={`segment-btn ${
                   currentDisplayOptions.marginPreset === "Medium" ? "active" : ""
                 }`}
                 onClick={() =>
@@ -1081,7 +1108,8 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
               </button>
               <button
                 type="button"
-                className={`segment-btn ${
+                aria-pressed={currentDisplayOptions.marginPreset === "Custom"}
+                  className={`segment-btn ${
                   currentDisplayOptions.marginPreset === "Custom" ? "active" : ""
                 }`}
                 onClick={() => handleOptionChange("marginPreset", "Custom")}
@@ -1204,7 +1232,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
               )}
             </div>
             <select
-              className="setting-select"
+              aria-label="fit" className="setting-select"
               value={currentDisplayOptions.fit}
               onChange={(e) =>
                 handleOptionChange(
@@ -1213,8 +1241,8 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                 )
               }
             >
-              <option value="Contain">Contain (show entire image with border)</option>
-              <option value="Cover">Cover (fill page edge-to-edge)</option>
+              <option value="Contain">Contain · show entire image</option>
+              <option value="Cover">Cover · fill printable area</option>
               <option value="Original">Original 1:1 scale</option>
             </select>
           </div>
@@ -1246,7 +1274,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
               )}
             </div>
             <select
-              className="setting-select"
+              aria-label="profile" className="setting-select"
               value={currentDisplayOptions.profile}
               onChange={(e) =>
                 handleOptionChange(
@@ -1255,9 +1283,9 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                 )
               }
             >
-              <option value="Screen/Mobile">Screen / Mobile (good quality, smaller size)</option>
-              <option value="Print">Print (high resolution, 300 DPI)</option>
-              <option value="Original">Original uncompressed bytes</option>
+              <option value="Screen/Mobile">Screen / mobile · smaller file</option>
+              <option value="Print">Print · high resolution</option>
+              <option value="Original">Original quality</option>
             </select>
           </div>
 
@@ -1283,7 +1311,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
               </div>
               <input
                 type="text"
-                className="setting-input"
+                aria-label="Output filename" className="setting-input"
                 value={options.filename}
                 onChange={(e) => {
                   documentSessionStore.setOptions(TOOL_ID, { filename: e.target.value });
@@ -1293,7 +1321,8 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
           )}
 
           {/* Primary CTA: Create PDF Button */}
-          <div className="sidebar-cta-group">
+          <button className="mobile-only primary-action settings-done" onClick={() => setMobileSettingsOpen(false)}>Done</button>
+          <div className="sidebar-cta-group desktop-only">
             <button
               type="button"
               className="btn-create-pdf"
@@ -1304,7 +1333,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
               <span>
                 {isProcessing
                   ? "Creating PDF…"
-                  : result && result.isOutdated
+                  : result && session.isOutdated
                   ? "Create updated PDF"
                   : "Create PDF"}
               </span>
@@ -1338,16 +1367,17 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
 
           {/* Post-Export Result Card */}
           {result && (
-            <div className={`export-result-card ${result.isOutdated ? "outdated" : ""}`}>
+            <div className={`export-result-card ${session.isOutdated ? "outdated" : ""}`}>
               <div className="result-header">
                 <span className="result-check">✓</span>
-                <strong>{result.isOutdated ? "PDF outdated" : "PDF Ready!"}</strong>
+                <strong>{session.isOutdated ? "PDF outdated" : "PDF Ready!"}</strong>
               </div>
               <p className="result-meta">
                 {result.filename} · {(result.sizeBytes / (1024 * 1024)).toFixed(2)} MB
               </p>
               <button
                 type="button"
+                disabled={session.isOutdated}
                 className="btn-download-result"
                 onClick={handleDownload}
               >
@@ -1360,7 +1390,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
 
       {/* Confirmation Modal: Apply These Settings to All Pages */}
       {showApplyAllModal && activeInspectItem && (
-        <div className="folio-modal-backdrop" role="dialog" aria-modal="true">
+        <div ref={confirmPanel} className="folio-modal-backdrop" role="dialog" aria-label="Apply settings to all pages" aria-modal="true">
           <div className="folio-modal-card confirm-modal-card">
             <div className="modal-header">
               <h3>Apply settings to all pages?</h3>
@@ -1426,27 +1456,28 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
           aria-label="Open document settings"
           title="Document settings"
         >
-          <SettingsIcon className="btn-sub-icon" />
+          <SettingsIcon className="btn-sub-icon" /> Settings
         </button>
 
         <button
           type="button"
           className="btn-mobile-create-pdf"
-          onClick={result && !result.isOutdated ? handleDownload : handleGeneratePdf}
+          onClick={result && !session.isOutdated ? handleDownload : handleGeneratePdf}
           disabled={isProcessing || sortedItems.length === 0}
         >
           <PdfDocIcon className="btn-pdf-icon" />
           <span>
             {isProcessing
               ? "Creating…"
-              : result && !result.isOutdated
+              : result && !session.isOutdated
               ? "Download PDF"
-              : result && result.isOutdated
+              : result && session.isOutdated
               ? "Create updated PDF"
               : "Create PDF"}
           </span>
         </button>
       </div>
+      </>}
     </div>
   );
 }

@@ -18,7 +18,7 @@ export const DEFAULT_PDF_OPTIONS: PdfOptions = {
   marginPreset: "Small",
   marginMm: 12,
   customMargins: [12, 12, 12, 12],
-  filename: "My travel pages.pdf",
+  filename: "Document.pdf",
   sort: "natural-asc",
   manualOrder: [],
 };
@@ -341,6 +341,7 @@ export const documentSessionStore = {
     const newId = `img_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const cloned: ImageItem = {
       ...orig,
+      objectUrl: URL.createObjectURL(orig.file),
       id: newId,
       name: orig.name.includes(" (Copy)")
         ? orig.name
@@ -361,7 +362,10 @@ export const documentSessionStore = {
 
     let newManualOrder = cur.options.manualOrder;
     if (cur.options.sort === "manual") {
-      newManualOrder = newItems.map((it) => it.id);
+      const orderedIds = new Set(newManualOrder);
+      const appendedIds = cur.items.map(item => item.id).filter(itemId => !orderedIds.has(itemId));
+      newManualOrder = [...newManualOrder, ...appendedIds];
+      newManualOrder.splice(newManualOrder.indexOf(id) + 1, 0, newId);
     }
 
     sessions[toolId] = {
@@ -480,20 +484,24 @@ export const documentSessionStore = {
       );
 
       if (!controller.signal.aborted) {
+        if (cur.result) URL.revokeObjectURL(cur.result.url);
+        const latest = this.getToolState(toolId);
         sessions[toolId] = {
           ...this.getToolState(toolId),
           result: res,
           jobStatus: "completed",
           progress: null,
-          isOutdated: false,
+          isOutdated: latest.items !== cur.items || latest.options !== cur.options,
           errorMessage: "",
         };
         activeAbortController = null;
         emit();
         return res;
       }
+      URL.revokeObjectURL(res.url);
       return null;
     } catch (err) {
+      if (activeAbortController !== controller) return null;
       const isCancelled =
         controller.signal.aborted ||
         (err as Error).message?.includes("cancelled") ||

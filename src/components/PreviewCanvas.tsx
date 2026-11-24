@@ -3,6 +3,7 @@ import { ImageItem, PdfOptions } from "../types";
 import { calculateGeometry, ptToMm } from "../lib/layout";
 
 interface PreviewCanvasProps {
+  zoom?: number;
   item: ImageItem | null;
   options: PdfOptions;
   pageIndex: number;
@@ -14,6 +15,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   item,
   options,
   pageIndex,
+  zoom = 1,
   totalPages,
   onPageChange,
 }) => {
@@ -46,14 +48,12 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
 
       // Scale canvas for high-DPI displays
       const dpr = window.devicePixelRatio || 1;
-      const displayWidth = 440;
+      const displayWidth = 720;
       const scale = displayWidth / pageWidthPt;
       const displayHeight = pageHeightPt * scale;
 
       canvas.width = displayWidth * dpr;
       canvas.height = displayHeight * dpr;
-      canvas.style.width = "100%";
-      canvas.style.maxWidth = `${displayWidth}px`;
       canvas.style.aspectRatio = `${pageWidthPt} / ${pageHeightPt}`;
 
       ctx.scale(dpr * scale, dpr * scale);
@@ -205,7 +205,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
       </div>
 
       <div className="preview-canvas-wrapper">
-        <canvas ref={canvasRef} className="preview-canvas" />
+        <canvas ref={canvasRef} className="preview-canvas" style={{ width: `${100 * zoom}%` }} aria-label={`Preview of ${item.name}`} />
       </div>
 
       {totalPages > 1 && (

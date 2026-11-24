@@ -1,9 +1,9 @@
+import { UploadZone } from "./UploadZone";
 import React, { useRef, useState, useMemo, useEffect } from "react";
-import { CompressionPreset, CompressionResult } from "../types";
+import { CompressionPreset } from "../types";
 import {
   useCompressionSession,
   compressionSessionStore,
-  CompressionItem,
 } from "../lib/compressionSessionStore";
 import { useRouter, router } from "../lib/router";
 import { mapStrengthToSettings } from "../lib/compressEngine";
@@ -116,6 +116,10 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
       if (currentRoute.toolId === "compress-pdf" && currentRoute.stage === "processing") {
         router.navigate({ toolId: "compress-pdf", stage: "result", replace: true });
       }
+    }).then(() => {
+      if (compressionSessionStore.getState().jobStatus === "failed" && router.getRoute().toolId === "compress-pdf" && router.getRoute().stage === "processing") {
+        router.navigate({ toolId: "compress-pdf", stage: "editor", replace: true });
+      }
     });
   };
 
@@ -161,22 +165,6 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
       0
     );
   }, [items, fileInfo]);
-
-  const totalOutputBytes = useMemo(() => {
-    return items.reduce(
-      (sum, it) => sum + (it.result ? it.result.outputBytes : it.size),
-      0
-    );
-  }, [items]);
-
-  const totalReduced = totalOutputBytes < totalOriginalBytes;
-  const totalPercentSaved = totalReduced
-    ? Number((((totalOriginalBytes - totalOutputBytes) / totalOriginalBytes) * 100).toFixed(1))
-    : 0;
-
-  const completedCount = useMemo(() => {
-    return Object.keys(results).length;
-  }, [results]);
 
   // Handle jump page submission
   const handleJumpSubmit = (e: React.FormEvent) => {
@@ -300,28 +288,8 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
           </div>
         )}
 
-        <div
-          className="empty-dropzone"
-          onClick={() => fileInputRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            if (e.dataTransfer.files?.length) handleSelectFiles(e.dataTransfer.files, true);
-          }}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => e.key === "Enter" && fileInputRef.current?.click()}
-          aria-label="Upload PDF files"
-        >
-          <div className="dropzone-art">
-            <CompressIcon className="dropzone-icon" />
-          </div>
-          <h3>Select PDF file(s) to compress</h3>
-          <p>Drag and drop one or multiple PDF files here, or click to choose from your device.</p>
-          <button type="button" className="btn-primary-action btn-choose-file">
-            Choose PDF File(s)
-          </button>
-        </div>
+        <UploadZone tool="compress-pdf" title="Reduce PDF file size" action="Add PDFs" formats="One PDF or a batch"
+          onChoose={() => fileInputRef.current?.click()} onFiles={files => handleSelectFiles(files, true)} />
       </div>
     );
   }
@@ -355,7 +323,7 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
           </div>
         </div>
 
-        <div className="processing-hero-card">
+        <div className="processing-hero-card" role="status">
           <div className="processing-animation-ring">
             <div className="spinner-large" />
           </div>
@@ -379,7 +347,7 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
             <div className="progress-bar-track">
               <div
                 className="progress-bar-fill"
-                style={{ width: `${batchProgress?.percent || progress?.percent || 5}%` }}
+                style={{ width: `${batchProgress?.percent ?? progress?.percent ?? 0}%` }}
                 role="progressbar"
                 aria-valuenow={batchProgress?.percent || progress?.percent || 0}
                 aria-valuemin={0}
@@ -443,6 +411,12 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
 
     // A. BATCH RESULT SCREEN
     if (isBatch) {
+      const completed = Object.values(results);
+      const completedCount = completed.length;
+      const originalBytes = completed.reduce((sum, entry) => sum + entry.originalBytes, 0);
+      const outputBytes = completed.reduce((sum, entry) => sum + entry.outputBytes, 0);
+      const savedBytes = originalBytes - outputBytes;
+      const percentSaved = originalBytes ? Number((100 * savedBytes / originalBytes).toFixed(1)) : 0;
       return (
         <div className="folio-workspace tool-generic-workspace compress-workspace result-workspace">
           <div className="tool-workspace-header">
@@ -469,25 +443,26 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
               <span className="result-badge-check">✓</span>
             </div>
 
-            <h2 className="result-hero-heading">All PDFs Processed Successfully!</h2>
+            <h2 className="result-hero-heading">{completedCount} of {items.length} PDFs ready</h2>
             <p className="result-hero-desc">
-              Preserved all text, fonts, and vector elements across {items.length} documents. Embedded images were optimized at {strength}% strength.
+              {isOutdated ? "The queue or settings changed. Run compression again for an updated archive." : "Download the finished files together or individually."}
+              {completedCount < items.length && " The size totals cover finished files only."}
             </p>
 
             <div className="compress-stats-grid result-page-stats">
               <div className="stat-item">
                 <span className="stat-label">Total original</span>
-                <span className="stat-val">{formatBytes(totalOriginalBytes)}</span>
+                <span className="stat-val">{formatBytes(originalBytes)}</span>
               </div>
               <div className="stat-item">
                 <span className="stat-label">Total output</span>
-                <span className="stat-val">{formatBytes(totalOutputBytes)}</span>
+                <span className="stat-val">{formatBytes(outputBytes)}</span>
               </div>
               <div className="stat-item highlight">
                 <span className="stat-label">Total savings</span>
                 <span className="stat-val">
-                  {totalReduced
-                    ? `−${totalPercentSaved}% (${formatBytes(totalOriginalBytes - totalOutputBytes)} saved)`
+                  {savedBytes > 0
+                    ? `−${percentSaved}% (${formatBytes(savedBytes)} saved)`
                     : "0%"}
                 </span>
               </div>
@@ -500,22 +475,24 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
                 download="folio_compressed_pdfs.zip"
                 className="btn-download-zip-hero"
               >
-                ⬇ Download All as ZIP ({items.length} PDFs · {formatBytes(totalOutputBytes)})
+                Download ZIP ({completedCount} PDFs · {formatBytes(session.zipBlob?.size || 0)})
               </a>
             ) : null}
 
             {/* File-by-file breakdown */}
             <div className="batch-results-list" role="list" aria-label="Individual compressed files">
               {items.map((it) => {
-                const itemRes = it.result;
-                const isReduced = itemRes?.isReduced;
-                const downloadUrl = isReduced
-                  ? itemRes.url
-                  : URL.createObjectURL(it.file);
+                const itemRes = results[it.id];
+                if (!itemRes) {
+                  const status = it.status === "failed" ? it.errorMessage || "Compression failed" : "Awaiting compression";
+                  return <div key={it.id} className="batch-result-row" role="listitem">{it.name} · {status}</div>;
+                }
+                const isReduced = itemRes.isReduced;
+                const downloadUrl = itemRes.url;
                 const downloadFilename = isReduced ? itemRes.filename : it.name;
 
                 return (
-                  <div key={it.id} className="batch-result-row">
+                  <div key={it.id} className="batch-result-row" role="listitem">
                     <div className="batch-result-info">
                       <PdfDocIcon className="batch-file-icon" />
                       <div className="batch-file-texts">
@@ -524,8 +501,8 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
                         </span>
                         <div className="batch-result-meta">
                           <span>
-                            {formatBytes(it.size)} →{" "}
-                            {itemRes ? formatBytes(itemRes.outputBytes) : "N/A"}
+                            {formatBytes(itemRes.originalBytes)} →{" "}
+                            {formatBytes(itemRes.outputBytes)}
                           </span>
                           {isReduced && (
                             <span className="batch-savings-tag">
@@ -599,7 +576,7 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
             </div>
 
             <h2 className="result-hero-heading">
-              {result.isReduced ? "Your PDF is ready!" : "PDF Already Optimized"}
+              {result.isReduced ? "Your PDF is ready!" : "Original file retained"}
             </h2>
 
             <p className="result-hero-desc">
@@ -633,13 +610,7 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
 
             <div className="result-cta-group">
               <a
-                href={
-                  result.isReduced
-                    ? result.url
-                    : file
-                    ? URL.createObjectURL(file)
-                    : "#"
-                }
+                href={result.url}
                 download={
                   result.isReduced
                     ? result.filename
@@ -877,7 +848,8 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
             <div className="preset-card-group-row">
               <button
                 type="button"
-                className={`preset-pill-btn ${preset === "high-quality" ? "active" : ""}`}
+                aria-pressed={preset === "high-quality"}
+                  className={`preset-pill-btn ${preset === "high-quality" ? "active" : ""}`}
                 onClick={() => handleSelectPreset("high-quality")}
               >
                 <div className="preset-pill-title">High quality</div>
@@ -886,7 +858,8 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
 
               <button
                 type="button"
-                className={`preset-pill-btn ${preset === "balanced" ? "active" : ""}`}
+                aria-pressed={preset === "balanced"}
+                  className={`preset-pill-btn ${preset === "balanced" ? "active" : ""}`}
                 onClick={() => handleSelectPreset("balanced")}
               >
                 <div className="preset-pill-title">Balanced</div>
@@ -895,7 +868,8 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
 
               <button
                 type="button"
-                className={`preset-pill-btn ${preset === "smallest" ? "active" : ""}`}
+                aria-pressed={preset === "smallest"}
+                  className={`preset-pill-btn ${preset === "smallest" ? "active" : ""}`}
                 onClick={() => handleSelectPreset("smallest")}
               >
                 <div className="preset-pill-title">Smallest file</div>
@@ -963,6 +937,7 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
               <div className="segmented-control mode-selector">
                 <button
                   type="button"
+                  aria-pressed={previewViewMode !== "compressed"}
                   className={`segment-btn ${previewViewMode !== "compressed" ? "active" : ""}`}
                   onClick={() => compressionSessionStore.setPreviewViewMode("original")}
                 >
@@ -970,6 +945,7 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
                 </button>
                 <button
                   type="button"
+                  aria-pressed={previewViewMode === "compressed"}
                   className={`segment-btn ${previewViewMode === "compressed" ? "active" : ""}`}
                   onClick={() => compressionSessionStore.setPreviewViewMode("compressed")}
                 >
@@ -1130,7 +1106,7 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
               <div className="result-header">
                 <span className="result-check">{result.isReduced ? "✓" : "ℹ"}</span>
                 <strong>
-                  {result.isReduced ? "Compression Output Ready" : "PDF Already Optimized"}
+                  {result.isReduced ? "Compression Output Ready" : "Original file retained"}
                 </strong>
               </div>
 
@@ -1159,13 +1135,7 @@ export function CompressPdfWorkspace({ onBackToHome }: CompressPdfWorkspaceProps
 
               <div className="result-card-actions">
                 <a
-                  href={
-                    result.isReduced
-                      ? result.url
-                      : file
-                      ? URL.createObjectURL(file)
-                      : "#"
-                  }
+                  href={result.url}
                   download={
                     result.isReduced
                       ? result.filename

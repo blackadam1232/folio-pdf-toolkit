@@ -1,5 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { PDFDocument } from "pdf-lib";
+import { CompressPdfWorkspace } from "../components/CompressPdfWorkspace";
+import { compressionSessionStore } from "../lib/compressionSessionStore";
+import * as navigation from "../lib/router";
+import type { CompressionResult } from "../types";
 import {
   mapStrengthToSettings,
   getPresetForStrength,
@@ -83,5 +89,41 @@ describe("Compress Engine & Mapping Verification", () => {
     // Verify output re-loads and preserves pages
     const reloaded = await PDFDocument.load(await result.blob.arrayBuffer());
     expect(reloaded.getPageCount()).toBe(2);
+  });
+
+  it("reports batch size and savings from finished files while distinguishing failed and pending files", () => {
+    const file = new File([new Uint8Array(512)], "ready.pdf", { type: "application/pdf" });
+    const result: CompressionResult = {
+      blob: file.slice(0, 128), url: "blob:ready", filename: "ready_compressed.pdf",
+      originalBytes: 512, outputBytes: 128, percentSaved: 75, isReduced: true,
+      pageCount: 1, preset: "balanced", strength: 50,
+    };
+    const entry = { file, size: file.size, pageCount: 1 };
+    const session = compressionSessionStore.getState();
+    const state = vi.spyOn(compressionSessionStore, "getState").mockReturnValue({
+      ...session,
+      items: [
+        { ...entry, id: "ready", name: file.name, status: "completed", result },
+        { ...entry, id: "failed", name: "error.pdf", status: "failed", errorMessage: "Unreadable image" },
+        { ...entry, id: "pending", name: "new.pdf", status: "idle" },
+      ],
+      results: { ready: result },
+      isOutdated: true,
+    });
+    const route = vi.spyOn(navigation, "useRouter").mockReturnValue({
+      ...navigation.router.getRoute(), toolId: "compress-pdf", stage: "result",
+    });
+    try {
+      const html = renderToStaticMarkup(createElement(CompressPdfWorkspace, { onBackToHome: () => {} }));
+      expect(html).toContain("1 of 3 PDFs ready");
+      expect(html).toMatch(/Total original<\/span><span[^>]*>512 B/);
+      expect(html).toMatch(/Total output<\/span><span[^>]*>128 B/);
+      expect(html).toContain("75% (384 B saved)");
+      expect(html).toContain("error.pdf · Unreadable image");
+      expect(html).toContain("new.pdf · Awaiting compression");
+    } finally {
+      route.mockRestore();
+      state.mockRestore();
+    }
   });
 });

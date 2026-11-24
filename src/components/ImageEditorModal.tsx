@@ -1,3 +1,4 @@
+import { useDialogFocus } from "../lib/useDialogFocus";
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { CropRect, ImageItem } from "../types";
 import {
@@ -44,6 +45,11 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
   onApply,
 }) => {
   if (!isOpen || !item) return null;
+  return <ImageEditor key={item.id} item={item} pageIndex={pageIndex} totalPages={totalPages} onClose={onClose} onApply={onApply} />;
+};
+
+const ImageEditor = ({ item, pageIndex, totalPages, onClose, onApply }: Omit<ImageEditorModalProps, "item" | "isOpen"> & { item: ImageItem }) => {
+  const dialogRef = useDialogFocus<HTMLDivElement>(true, onClose);
 
   // Initial draft states
   const [draftRotation, setDraftRotation] = useState<number>(item.rotation || 0);
@@ -399,9 +405,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
   // Keyboard navigation & shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-      } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         handleApply();
       }
     };
@@ -434,7 +438,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
       aria-modal="true"
       aria-labelledby="image-editor-title"
     >
-      <div className="image-editor-modal">
+      <div ref={dialogRef} className="image-editor-modal">
         {/* Modal Header */}
         <header className="image-editor-header">
           <div className="header-meta">
@@ -698,6 +702,19 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
           </div>
         </div>
 
+        <details className="crop-fields"><summary>Crop dimensions</summary>
+          <div>{(["x", "y", "width", "height"] as const).map(key => {
+            const max = key === "width" ? 1 - draftCrop.x : key === "height" ? 1 - draftCrop.y : key === "x" ? 1 - draftCrop.width : 1 - draftCrop.height;
+            const min = key === "width" || key === "height" ? .01 : 0;
+            return <label key={key}>{({ x: "Left", y: "Top", width: "Width", height: "Height" })[key]} (%)
+              <input type="number" min={Math.ceil(min * 100)} max={Math.round(max * 100)} value={Math.round(draftCrop[key] * 100)}
+                onChange={event => {
+                  if (!Number.isFinite(event.target.valueAsNumber)) return;
+                  recordHistory(); setAspectPreset("free");
+                  setDraftCrop({ ...draftCrop, [key]: Math.max(min, Math.min(max, event.target.valueAsNumber / 100)) });
+                }} /></label>;
+          })}</div>
+        </details>
         {/* Modal Footer Bar */}
         <footer className="image-editor-footer">
           <div className="footer-left">

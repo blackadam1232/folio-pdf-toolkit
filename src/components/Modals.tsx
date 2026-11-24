@@ -1,4 +1,5 @@
-import React, { useEffect, useRef } from "react";
+import { useDialogFocus } from "../lib/useDialogFocus";
+import React from "react";
 import { LockIcon } from "./Icons";
 
 interface ModalProps {
@@ -7,39 +8,8 @@ interface ModalProps {
   triggerRef?: React.RefObject<HTMLElement | null>;
 }
 
-export function PrivacyModal({ isOpen, onClose, triggerRef }: ModalProps) {
-  const modalRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const previousActiveElement = document.activeElement as HTMLElement | null;
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-
-    // Focus close button on open
-    const closeBtn = modalRef.current?.querySelector<HTMLButtonElement>(".modal-close-btn");
-    closeBtn?.focus();
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = originalOverflow;
-      if (triggerRef?.current) {
-        triggerRef.current.focus();
-      } else if (previousActiveElement && typeof previousActiveElement.focus === "function") {
-        previousActiveElement.focus();
-      }
-    };
-  }, [isOpen, onClose, triggerRef]);
+export function PrivacyModal({ isOpen, onClose }: ModalProps) {
+  const modalRef = useDialogFocus<HTMLDivElement>(isOpen, onClose);
 
   if (!isOpen) return null;
 
@@ -118,39 +88,8 @@ export function PrivacyModal({ isOpen, onClose, triggerRef }: ModalProps) {
   );
 }
 
-export function HelpModal({ isOpen, onClose, triggerRef }: ModalProps) {
-  const modalRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const previousActiveElement = document.activeElement as HTMLElement | null;
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-
-    // Focus close button on open
-    const closeBtn = modalRef.current?.querySelector<HTMLButtonElement>(".modal-close-btn");
-    closeBtn?.focus();
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = originalOverflow;
-      if (triggerRef?.current) {
-        triggerRef.current.focus();
-      } else if (previousActiveElement && typeof previousActiveElement.focus === "function") {
-        previousActiveElement.focus();
-      }
-    };
-  }, [isOpen, onClose, triggerRef]);
+export function HelpModal({ isOpen, onClose }: ModalProps) {
+  const modalRef = useDialogFocus<HTMLDivElement>(isOpen, onClose);
 
   if (!isOpen) return null;
 

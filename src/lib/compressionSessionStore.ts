@@ -147,8 +147,9 @@ export const compressionSessionStore = {
       return false;
     }
 
+    if (state.jobStatus === "processing") this.cancelCompression();
+    if (state.zipUrl) URL.revokeObjectURL(state.zipUrl);
     if (replace) {
-      if (state.zipUrl) URL.revokeObjectURL(state.zipUrl);
       Object.values(state.results).forEach((r) => {
         if (r?.url) URL.revokeObjectURL(r.url);
       });
@@ -172,11 +173,11 @@ export const compressionSessionStore = {
         pageCount: activeItem.pageCount,
       },
       previewPage: 1,
-      result: replace ? null : state.result,
+      result: replace ? null : state.results[activeItem.id] || null,
       results: replace ? {} : state.results,
-      zipBlob: replace ? null : state.zipBlob,
-      zipUrl: replace ? null : state.zipUrl,
-      isOutdated: false,
+      zipBlob: null,
+      zipUrl: null,
+      isOutdated: !replace && Object.keys(state.results).length > 0,
       errorMessage: "",
       previewImages: null,
       jobStatus: "idle",
@@ -192,6 +193,7 @@ export const compressionSessionStore = {
   removeFile(id: string) {
     const itemToRemove = state.items.find((it) => it.id === id);
     if (!itemToRemove) return;
+    if (state.jobStatus === "processing") this.cancelCompression();
 
     if (itemToRemove.result?.url) {
       URL.revokeObjectURL(itemToRemove.result.url);
@@ -340,7 +342,8 @@ export const compressionSessionStore = {
     onProgress?: (progress: { percent: number; status: string }) => void,
     onComplete?: (result: CompressionResult) => void
   ): Promise<CompressionResult | null> {
-    const itemsToCompress = [...state.items];
+    const jobStrength = state.strength;
+    const itemsToCompress: CompressionItem[] = state.items.map(item => ({ ...item, result: undefined, errorMessage: undefined, status: "idle" }));
     if (!itemsToCompress.length || state.jobStatus === "processing") {
       return null;
     }
@@ -352,6 +355,7 @@ export const compressionSessionStore = {
     state = {
       ...state,
       activeJobId: newJobId,
+      items: itemsToCompress,
       jobStatus: "processing",
       progress: { percent: 0, status: "Preparing compression…" },
       batchProgress: {
@@ -398,7 +402,7 @@ export const compressionSessionStore = {
         try {
           const res = await compressPdf(
             item.file,
-            state.strength,
+            jobStrength,
             (fileProg) => {
               if (state.activeJobId === newJobId && !controller.signal.aborted) {
                 const overallPercent = Math.min(
@@ -449,7 +453,8 @@ export const compressionSessionStore = {
         let zipUrl: string | null = null;
 
         const completedResults = Object.values(results);
-        if (completedResults.length > 1) {
+        if (!completedResults.length) throw new Error(itemsToCompress[0]?.errorMessage || "Compression failed.");
+        if (itemsToCompress.length > 1) {
           state = {
             ...state,
             progress: { percent: 98, status: "Packaging ZIP archive…" },
@@ -461,10 +466,15 @@ export const compressionSessionStore = {
             if (it.result) {
               const arrayBuf = await it.result.blob.arrayBuffer();
               const filename = it.result.isReduced ? it.result.filename : it.name;
-              zip.file(filename, arrayBuf);
+              let entry = filename;
+              for (let suffix = 2; zip.file(entry); suffix++) {
+                entry = filename.replace(/\.pdf$/i, "") + " (" + suffix + ").pdf";
+              }
+              zip.file(entry, arrayBuf);
             }
           }
           zipBlob = await zip.generateAsync({ type: "blob" });
+          if (state.activeJobId !== newJobId || controller.signal.aborted) return null;
           zipUrl = URL.createObjectURL(zipBlob);
         }
 
@@ -472,6 +482,7 @@ export const compressionSessionStore = {
           URL.revokeObjectURL(state.zipUrl);
         }
 
+        Object.values(state.results).forEach(previous => URL.revokeObjectURL(previous.url));
         const activeResult =
           (state.activeItemId && results[state.activeItemId]) ||
           completedResults[0] ||
@@ -487,7 +498,7 @@ export const compressionSessionStore = {
           jobStatus: "completed",
           progress: null,
           batchProgress: null,
-          isOutdated: false,
+          isOutdated: state.strength !== jobStrength,
           errorMessage: "",
         };
         activeAbortController = null;
@@ -517,6 +528,10 @@ export const compressionSessionStore = {
         emit();
       }
       return null;
+    } finally {
+      if (state.results !== results) {
+        Object.values(results).forEach(unused => URL.revokeObjectURL(unused.url));
+      }
     }
   },
 
@@ -527,6 +542,7 @@ export const compressionSessionStore = {
     }
     state = {
       ...state,
+      activeJobId: state.activeJobId + 1,
       jobStatus: "cancelled",
       progress: null,
       batchProgress: null,
@@ -541,6 +557,7 @@ export const compressionSessionStore = {
   },
 
   reset() {
+    currentPreviewJobId++;
     if (activeAbortController) {
       activeAbortController.abort();
       activeAbortController = null;

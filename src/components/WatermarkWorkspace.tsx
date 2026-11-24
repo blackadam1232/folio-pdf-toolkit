@@ -1,5 +1,7 @@
+import { ExportResult, ProcessingPanel, useToolOutput } from "./ExportFlow";
+import { UploadZone } from "./UploadZone";
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { inspectPdfFile, addWatermarkToPdf, parsePageRange } from "../lib/pdfEngine";
+import { inspectPdfFile, addWatermarkToPdf, parsePageRange, pageRangeError } from "../lib/pdfEngine";
 import { renderPdfPage, RenderedPageResult } from "../lib/pdfRenderer";
 import { StampIcon, PdfDocIcon } from "./Icons";
 import { WatermarkPosition } from "../types";
@@ -14,7 +16,7 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
   const [text, setText] = useState<string>("CONFIDENTIAL");
   const [fontSize, setFontSize] = useState<number>(48);
   const [opacity, setOpacity] = useState<number>(0.2);
-  const [color, setColor] = useState<string>("#4A5553");
+  const color = "#4A5553";
   const [position, setPosition] = useState<WatermarkPosition>("diagonal");
   const [pageRange, setPageRange] = useState<string>("");
   const [targetScope, setTargetScope] = useState<"all" | "custom">("all");
@@ -25,8 +27,7 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-  const [downloadName, setDownloadName] = useState("");
+  const { output, finish, edit } = useToolOutput("watermark");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -86,7 +87,6 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
       setPreviewPage(1);
       setRenderedPage(null);
       setPageRange(`1-${info.pageCount}`);
-      setDownloadUrl(null);
     } catch (err) {
       setErrorMessage((err as Error).message);
     }
@@ -119,15 +119,17 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
       });
 
       const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      setDownloadUrl(url);
-      setDownloadName(`${file.name.replace(/\.[^/.]+$/, "")}_watermarked.pdf`);
+      finish({ blob, name: `${file.name.replace(/\.[^/.]+$/, "")}_watermarked.pdf`, pages: pageCount });
     } catch (err) {
       setErrorMessage((err as Error).message || "Failed to add watermark.");
     } finally {
       setIsProcessing(false);
     }
   };
+
+  const disabledReason = !text.trim() ? "Enter watermark text." : file && targetScope === "custom" ? pageRangeError(pageRange, pageCount) : "";
+  if (isProcessing) return <ProcessingPanel title="Applying watermark" />;
+  if (output) return <ExportResult output={output} title="Watermarked PDF ready" onEdit={edit} />;
 
   return (
     <div className="folio-workspace tool-generic-workspace">
@@ -173,26 +175,13 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
       {errorMessage && (
         <div className="error-banner" role="alert">
           <span>⚠ {errorMessage}</span>
-          <button type="button" onClick={() => setErrorMessage("")}>✕</button>
+          <button type="button" aria-label="Dismiss error" onClick={() => setErrorMessage("")}>✕</button>
         </div>
       )}
 
       {!file ? (
-        <div
-          className="empty-dropzone"
-          onClick={() => fileInputRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            if (e.dataTransfer.files?.[0]) handleSelectFile(e.dataTransfer.files[0]);
-          }}
-        >
-          <div className="dropzone-art">
-            <StampIcon className="dropzone-icon" />
-          </div>
-          <h3>Select a PDF to watermark</h3>
-          <p>Drag and drop a PDF file here, or click to choose from your device.</p>
-        </div>
+        <UploadZone tool="watermark" title="Select a PDF to watermark" action="Choose PDF"
+          onChoose={() => fileInputRef.current?.click()} onFiles={files => { if (files[0]) handleSelectFile(files[0]); }} />
       ) : (
         <div className="tool-content-layout">
           <div className="tool-inspect-panel">
@@ -267,7 +256,7 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
                       transform:
                         position === "diagonal"
                           ? "translate(-50%, -50%) rotate(-45deg)"
-                          : "none",
+                          : undefined,
                     }}
                   >
                     {text || "WATERMARK"}
@@ -291,8 +280,8 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
             <h2 className="sidebar-heading">Watermark options</h2>
 
             <div className="setting-group">
-              <label className="setting-label">Watermark text</label>
-              <input
+              <label className="setting-label" htmlFor="watermark-watermark-text">Watermark text</label>
+              <input id="watermark-watermark-text"
                 type="text"
                 className="setting-input"
                 value={text}
@@ -314,9 +303,10 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
 
             <div className="setting-group">
               <label className="setting-label">Placement</label>
-              <div className="segmented-control">
+              <div className="segmented-control" role="group" aria-label="Placement">
                 <button
                   type="button"
+                  aria-pressed={position === "diagonal"}
                   className={`segment-btn ${position === "diagonal" ? "active" : ""}`}
                   onClick={() => setPosition("diagonal")}
                 >
@@ -324,6 +314,7 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
                 </button>
                 <button
                   type="button"
+                  aria-pressed={position === "center"}
                   className={`segment-btn ${position === "center" ? "active" : ""}`}
                   onClick={() => setPosition("center")}
                 >
@@ -331,6 +322,7 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
                 </button>
                 <button
                   type="button"
+                  aria-pressed={position === "header"}
                   className={`segment-btn ${position === "header" ? "active" : ""}`}
                   onClick={() => setPosition("header")}
                 >
@@ -338,6 +330,7 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
                 </button>
                 <button
                   type="button"
+                  aria-pressed={position === "footer"}
                   className={`segment-btn ${position === "footer" ? "active" : ""}`}
                   onClick={() => setPosition("footer")}
                 >
@@ -347,9 +340,14 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
             </div>
 
             <div className="setting-group">
-              <label className="setting-label">Opacity: {Math.round(opacity * 100)}%</label>
+              <label className="setting-label" htmlFor="watermark-size">Text size · {fontSize} pt</label>
+              <input id="watermark-size" className="setting-slider" type="range" min="10" max="96" step="1"
+                value={fontSize} onChange={event => setFontSize(Number(event.target.value))} />
+            </div>
+            <div className="setting-group">
+              <label className="setting-label" htmlFor="watermark-opacity">Opacity  {Math.round(opacity * 100)}%</label>
               <input
-                type="range"
+                type="range" id="watermark-opacity"
                 min="0.05"
                 max="0.8"
                 step="0.05"
@@ -361,9 +359,10 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
 
             <div className="setting-group">
               <label className="setting-label">Pages</label>
-              <div className="segmented-control">
+              <div className="segmented-control" role="group" aria-label="Pages">
                 <button
                   type="button"
+                  aria-pressed={targetScope === "all"}
                   className={`segment-btn ${targetScope === "all" ? "active" : ""}`}
                   onClick={() => setTargetScope("all")}
                 >
@@ -371,6 +370,7 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
                 </button>
                 <button
                   type="button"
+                  aria-pressed={targetScope === "custom"}
                   className={`segment-btn ${targetScope === "custom" ? "active" : ""}`}
                   onClick={() => setTargetScope("custom")}
                 >
@@ -382,6 +382,7 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
                 <div className="custom-range-input-wrap">
                   <input
                     type="text"
+                    aria-label="Page range"
                     className="setting-input"
                     placeholder="e.g. 1-5"
                     value={pageRange}
@@ -391,32 +392,16 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
               )}
             </div>
 
+            {disabledReason && <p className="field-error" role="status">{disabledReason}</p>}
             <button
               type="button"
               className="btn-create-pdf"
               onClick={handleApplyWatermark}
-              disabled={isProcessing}
+              disabled={Boolean(disabledReason)}
             >
               <StampIcon className="btn-pdf-icon" />
-              <span>{isProcessing ? "Applying…" : "Apply Watermark"}</span>
+              <span>Apply Watermark</span>
             </button>
-
-            {downloadUrl && (
-              <div className="export-result-card">
-                <div className="result-header">
-                  <span className="result-check">✓</span>
-                  <strong>Watermarked PDF Ready!</strong>
-                </div>
-                <p className="result-meta">{downloadName}</p>
-                <a
-                  href={downloadUrl}
-                  download={downloadName}
-                  className="btn-download-result text-center"
-                >
-                  Download Watermarked PDF
-                </a>
-              </div>
-            )}
           </aside>
         </div>
       )}
@@ -427,22 +412,11 @@ export function WatermarkWorkspace({ onBackToHome }: WatermarkWorkspaceProps) {
           <button
             type="button"
             className="btn-mobile-create-pdf"
-            onClick={downloadUrl ? () => {
-              const a = document.createElement("a");
-              a.href = downloadUrl;
-              a.download = downloadName;
-              a.click();
-            } : handleApplyWatermark}
-            disabled={isProcessing}
+            onClick={handleApplyWatermark}
+            disabled={Boolean(disabledReason)}
           >
             <StampIcon className="btn-pdf-icon" />
-            <span>
-              {isProcessing
-                ? "Applying…"
-                : downloadUrl
-                ? "Download PDF"
-                : "Apply Watermark"}
-            </span>
+            <span>Apply Watermark</span>
           </button>
         </div>
       )}

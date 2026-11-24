@@ -256,7 +256,7 @@ export async function compressPdf(
     ? Number((((originalBytes - outputBytes) / originalBytes) * 100).toFixed(1))
     : 0;
 
-  const blob = new Blob([outputPdfBytes.buffer as ArrayBuffer], { type: "application/pdf" });
+  const blob = isReduced ? new Blob([outputPdfBytes.buffer as ArrayBuffer], { type: "application/pdf" }) : file;
   const url = URL.createObjectURL(blob);
   const baseName = file.name.replace(/\.[^/.]+$/, "");
   const filename = `${baseName}_compressed.pdf`;
@@ -267,7 +267,7 @@ export async function compressPdf(
     blob,
     url,
     originalBytes,
-    outputBytes,
+    outputBytes: blob.size,
     percentSaved,
     isReduced,
     filename,
