@@ -2,6 +2,9 @@ import { setupTestEnvironment } from "./testEnv";
 setupTestEnvironment();
 
 import { describe, it, expect, beforeEach } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ImagesToPdfWorkspace } from "../components/ImagesToPdfWorkspace";
 import { router } from "../lib/router";
 import { documentSessionStore, DEFAULT_PDF_OPTIONS } from "../lib/documentSessionStore";
 import { calculateGeometry } from "../lib/layout";
@@ -94,6 +97,22 @@ describe("Mobile Workflow, Navigation State, and Layout Fidelity", () => {
     expect(state.items[0].name).toBe("receipt.jpg");
     expect(state.options.pageSize).toBe("Letter");
     expect(state.options.fit).toBe("Contain");
+  });
+
+  it("exposes checkboxes and individual image actions when the page menus are closed", () => {
+    documentSessionStore.setItems(TOOL, [createMockImage("1", "a.jpg"), createMockImage("2", "b.jpg")]);
+    documentSessionStore.toggleSelectId(TOOL, "2");
+    const html = renderToStaticMarkup(createElement(ImagesToPdfWorkspace, { onBackToHome: () => {} }));
+    const outsideMenus = html.replace(/<details\b[^>]*>[\s\S]*?<\/details>/g, "");
+    for (const page of [1, 2]) {
+      const checkbox = outsideMenus.match(new RegExp(`<input[^>]*aria-label="Select page ${page}"[^>]*>`))?.[0];
+      expect(checkbox).toContain('type="checkbox"');
+      expect(checkbox?.includes("checked=")).toBe(page === 2);
+      for (const action of ["Edit", "Copy", "Rotate"]) {
+        expect(outsideMenus).toContain(`aria-label="${action} page ${page}`);
+      }
+    }
+    expect(html).toContain("Delete page</button>");
   });
 
   it("handles batch selection, move earlier/later, and removal cleanly", () => {

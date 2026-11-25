@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { documentSessionStore } from "../lib/documentSessionStore";
+import { MAX_FILES_LIMIT, MAX_TOTAL_BYTES_LIMIT } from "../lib/pdfEngine";
+import { sortImageItems } from "../lib/sort";
 import { ImageItem } from "../types";
 
 function createDummyItem(id: string, name: string): ImageItem {
@@ -95,6 +97,45 @@ describe("Document Session Store", () => {
     const state = documentSessionStore.getToolState(TOOL);
     expect(state.options.pageSize).toBe("Letter");
     expect(state.options.fit).toBe("Cover");
+  });
+
+  it("inserts independent copies beside checked pages in displayed order and selects the copies", () => {
+    const original = createDummyItem("3", "c.jpg");
+    original.crop = { x: 0.1, y: 0.1, width: 0.8, height: 0.8 };
+    original.customOptions = { customMargins: [1, 2, 3, 4] };
+    const items = [original, createDummyItem("2", "b.jpg"), createDummyItem("1", "a.jpg")];
+    documentSessionStore.setItems(TOOL, items);
+    documentSessionStore.setSelectedIds(TOOL, ["3", "1"]);
+
+    const [copyA, copyC] = documentSessionStore.duplicateSelected(TOOL);
+    const state = documentSessionStore.getToolState(TOOL);
+    const displayed = sortImageItems(state.items, state.options.sort, state.options.manualOrder);
+    expect(displayed.map(item => item.id)).toEqual(["1", copyA, "2", "3", copyC]);
+    expect(state.selectedIds).toEqual([copyA, copyC]);
+    expect(displayed[4].objectUrl).not.toBe(original.objectUrl);
+    expect(displayed[4].crop).toEqual(original.crop);
+    expect(displayed[4].crop).not.toBe(original.crop);
+    expect(displayed[4].customOptions?.customMargins).not.toBe(original.customOptions.customMargins);
+    documentSessionStore.rotateSelected(TOOL, 90);
+    expect(documentSessionStore.getToolState(TOOL).items.filter(item => item.rotation === 90).map(item => item.id).sort()).toEqual([copyA, copyC].sort());
+  });
+
+  it("rejects oversized copy operations without adding or selecting partial results", () => {
+    const item = createDummyItem("1", "large.jpg");
+    item.size = MAX_TOTAL_BYTES_LIMIT;
+    documentSessionStore.setItems(TOOL, [item]);
+    documentSessionStore.selectAll(TOOL);
+    const oversized = documentSessionStore.getToolState(TOOL);
+    expect(documentSessionStore.duplicateItem(TOOL, item.id)).toBe("");
+    expect(documentSessionStore.duplicateSelected(TOOL)).toEqual([]);
+    expect(documentSessionStore.getToolState(TOOL)).toBe(oversized);
+
+    const pages = Array.from({ length: MAX_FILES_LIMIT - 1 }, (_, i) => createDummyItem(String(i), i + ".jpg"));
+    documentSessionStore.setItems(TOOL, pages);
+    documentSessionStore.setSelectedIds(TOOL, ["0", "1"]);
+    const nearlyFull = documentSessionStore.getToolState(TOOL);
+    expect(documentSessionStore.duplicateSelected(TOOL)).toEqual([]);
+    expect(documentSessionStore.getToolState(TOOL)).toBe(nearlyFull);
   });
 
   it("supports explicit cancellation and preserves files", () => {

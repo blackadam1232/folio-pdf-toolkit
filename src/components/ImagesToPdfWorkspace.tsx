@@ -31,6 +31,7 @@ import { ThumbnailSheet } from "./ThumbnailSheet";
 import { PreviewCanvas } from "./PreviewCanvas";
 import { ImageEditorModal } from "./ImageEditorModal";
 import {
+  EditIcon,
   RotateIcon,
   TrashIcon,
   CheckIcon,
@@ -69,12 +70,15 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
   const [isLoadingSamples, setIsLoadingSamples] = useState<boolean>(false);
   const [singleZoom, setSingleZoom] = useState<number>(1);
   const [jumpPageInput, setJumpPageInput] = useState<string>("1");
-  const removedOrder = useRef<string[]>([]);
-  const [undoStack, setUndoStack] = useState<ImageItem[] | null>(null);
-  const [undoMessage, setUndoMessage] = useState<string>("");
+  const [lastRemoval, setLastRemoval] = useState<{
+    pages: ImageItem[];
+    order: string[];
+    selected: string[];
+  } | null>(null);
 
   // Editor Modal State
-  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editQueue, setEditQueue] = useState<{ ids: string[]; index: number } | null>(null);
+  const editingItemId = editQueue?.ids[editQueue.index];
 
   // Apply to all pages confirmation modal
   const [showApplyAllModal, setShowApplyAllModal] = useState<boolean>(false);
@@ -267,9 +271,13 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
   };
 
   // Selection toggle
-  const toggleSelection = (id: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
+  const toggleSelection = (id: string) => {
     documentSessionStore.toggleSelectId(TOOL_ID, id);
+    if (!selectedIds.has(id)) documentSessionStore.setActiveInspectId(TOOL_ID, id);
+    else if (id === activeInspectId) {
+      const remaining = sortedItems.find(item => item.id !== id && selectedIds.has(item.id));
+      if (remaining) documentSessionStore.setActiveInspectId(TOOL_ID, remaining.id);
+    }
   };
 
   const handleSelectAll = () => {
@@ -286,18 +294,29 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     documentSessionStore.rotateSelected(TOOL_ID, 90);
   };
 
-  // Rotate single item
-  const handleRotateSingle = (id: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    documentSessionStore.rotateItem(TOOL_ID, id, 90);
+  const handleDuplicate = (id?: string) => {
+    try {
+      const added = id
+        ? documentSessionStore.duplicateItem(TOOL_ID, id)
+        : documentSessionStore.duplicateSelected(TOOL_ID);
+      setErrorMessage(added.length ? "" : "These copies would exceed the document’s image count or size limit.");
+    } catch {
+      setErrorMessage("Couldn’t create a copy. Try duplicating fewer images at once.");
+    }
   };
 
-  // Duplicate single item
-  const handleDuplicateItem = (id: string) => {
-    documentSessionStore.duplicateItem(TOOL_ID, id);
+  const editPage = (id: string) => setEditQueue({ ids: [id], index: 0 });
+  const editSelected = () => {
+    const ids = sortedItems.filter(item => selectedIds.has(item.id)).map(item => item.id);
+    if (ids.length) setEditQueue({ ids, index: 0 });
   };
 
   // Move selected earlier / later
+  const canMoveSelected = (direction: -1 | 1) => sortedItems.some((item, index) => {
+    const neighbor = sortedItems[index + direction];
+    return neighbor && selectedIds.has(item.id) && !selectedIds.has(neighbor.id);
+  });
+
   const handleMoveSelectedEarlier = () => {
     if (!selectedIds.size) return;
     const currentOrder = [...sortedItems];
@@ -332,27 +351,28 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
     });
   };
 
-  // Batch remove with Undo
-  const handleRemoveSelected = () => {
-    if (!selectedIds.size) return;
-    const toRemove = items.filter((it) => selectedIds.has(it.id));
-    removedOrder.current = items.map(item => item.id);
-    setUndoStack(toRemove);
-    setUndoMessage(`${toRemove.length} page${toRemove.length === 1 ? "" : "s"} removed.`);
-    documentSessionStore.removeSelected(TOOL_ID);
+  const deletePages = (page?: ImageItem) => {
+    const pages = page ? [page] : items.filter(item => selectedIds.has(item.id));
+    if (!pages.length) return;
+    setLastRemoval({
+      pages,
+      order: items.map(item => item.id),
+      selected: pages.filter(item => selectedIds.has(item.id)).map(item => item.id),
+    });
+    if (page) documentSessionStore.removeItem(TOOL_ID, page.id);
+    else documentSessionStore.removeSelected(TOOL_ID);
   };
 
   // Undo removal
   const handleUndo = () => {
-    if (undoStack && undoStack.length > 0) {
-      const restored = [...items];
-      for (const item of undoStack) {
-        restored.splice(removedOrder.current.indexOf(item.id), 0, { ...item, objectUrl: URL.createObjectURL(item.file) });
-      }
-      documentSessionStore.setItems(TOOL_ID, restored);
-      setUndoStack(null);
-      setUndoMessage("");
+    if (!lastRemoval) return;
+    const restored = [...items];
+    for (const item of lastRemoval.pages) {
+      restored.splice(lastRemoval.order.indexOf(item.id), 0, { ...item, objectUrl: URL.createObjectURL(item.file) });
     }
+    documentSessionStore.setItems(TOOL_ID, restored);
+    documentSessionStore.setSelectedIds(TOOL_ID, [...selectedIds, ...lastRemoval.selected]);
+    setLastRemoval(null);
   };
 
   // Handle Sort
@@ -460,7 +480,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
           onChoose={() => fileInputRef.current?.click()} onFiles={handleAddFiles}>
           <button className="sample-action" onClick={handleLoadSamples} disabled={isLoadingSamples}>{isLoadingSamples ? "Loading sample…" : "Try the sample photos"}</button>
         </UploadZone>
-        {undoStack && <button className="return-action" onClick={handleUndo}>Undo removal</button>}
+        {lastRemoval && <button className="return-action" onClick={handleUndo}>Undo removal</button>}
       </> : <>
       {/* Main Workspace Layout */}
       <div className="workspace-layout">
@@ -484,6 +504,11 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
               <span className="document-page-badge">
                 {sortedItems.length} {sortedItems.length === 1 ? "page" : "pages"}
               </span>
+              {viewMode === "overview" && (
+                <button type="button" className="btn-action-text selection-all" onClick={handleSelectAll}>
+                  {selectedIds.size === sortedItems.length ? "Deselect all" : "Select all"}
+                </button>
+              )}
             </div>
 
             <div className="title-controls-group">
@@ -601,9 +626,9 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
           )}
 
           {/* Undo Toast */}
-          {undoStack && (
+          {lastRemoval && (
             <div className="undo-toast-banner" role="status">
-              <span>{undoMessage}</span>
+              <span>{lastRemoval.pages.length} {lastRemoval.pages.length === 1 ? "page" : "pages"} deleted.</span>
               <button type="button" className="btn-undo-action" onClick={handleUndo}>
                 Undo
               </button>
@@ -613,10 +638,16 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
           {/* Batch Selection Action Bar */}
           {selectedIds.size > 0 && viewMode === "overview" && (
             <div className="selection-action-bar" role="region" aria-label="Selected pages actions">
-              <span className="selection-count">
+              <span className="selection-count" role="status" aria-atomic="true">
                 <strong>{selectedIds.size}</strong> of {sortedItems.length} selected
               </span>
               <div className="selection-buttons">
+                <button type="button" className="btn-action-inline" onClick={editSelected} title="Edit selected pages in order">
+                  <EditIcon className="btn-action-icon" /><span>Edit</span>
+                </button>
+                <button type="button" className="btn-action-inline" onClick={() => handleDuplicate()} title="Duplicate selected pages">
+                  <CopyIcon className="btn-action-icon" /><span>Duplicate</span>
+                </button>
                 <button
                   type="button"
                   className="btn-action-inline"
@@ -630,6 +661,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                   type="button"
                   className="btn-action-inline"
                   onClick={handleMoveSelectedEarlier}
+                  disabled={!canMoveSelected(-1)}
                   title="Move selected earlier in document order"
                 >
                   <span>← Earlier</span>
@@ -638,6 +670,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                   type="button"
                   className="btn-action-inline"
                   onClick={handleMoveSelectedLater}
+                  disabled={!canMoveSelected(1)}
                   title="Move selected later in document order"
                 >
                   <span>Later →</span>
@@ -645,18 +678,11 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                 <button
                   type="button"
                   className="btn-action-inline btn-danger"
-                  onClick={handleRemoveSelected}
-                  title="Remove selected pages"
+                  onClick={() => deletePages()}
+                  title="Delete selected pages"
                 >
                   <TrashIcon className="btn-action-icon" />
-                  <span>Remove</span>
-                </button>
-                <button
-                  type="button"
-                  className="btn-action-text"
-                  onClick={handleSelectAll}
-                >
-                  {selectedIds.size === sortedItems.length ? "Deselect all" : "Select all"}
+                  <span>Delete</span>
                 </button>
               </div>
             </div>
@@ -673,8 +699,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                       pageIndex={idx}
                       options={options}
                       isSelected={selectedIds.has(item.id)}
-                      isActiveInspect={activeInspectId === item.id}
-                      onToggleSelect={(id, e) => toggleSelection(id, e)}
+                      onToggleSelect={toggleSelection}
                       onInspect={(id) => {
                         documentSessionStore.setActiveInspectId(TOOL_ID, id);
                         documentSessionStore.setViewMode(TOOL_ID, "single");
@@ -686,18 +711,10 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                         [order[idx], order[target]] = [order[target], order[idx]];
                         documentSessionStore.setOptions(TOOL_ID, { sort: "manual", manualOrder: order.map(page => page.id) });
                       }}
-                      onRemove={() => {
-                        removedOrder.current = items.map(page => page.id);
-                        setUndoStack([item]); setUndoMessage("Page removed.");
-                        documentSessionStore.removeItem(TOOL_ID, item.id);
-                      }}
-                      onEdit={(id) => {
-                        setEditingItemId(id);
-                      }}
-                      onDuplicate={(id) => {
-                        handleDuplicateItem(id);
-                      }}
-                      onRotate={(id, e) => handleRotateSingle(id, e)}
+                      onRemove={() => deletePages(item)}
+                      onEdit={editPage}
+                      onDuplicate={handleDuplicate}
+                      onRotate={id => documentSessionStore.rotateItem(TOOL_ID, id, 90)}
                     />
                   ))}
                 </div>
@@ -709,7 +726,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                     {sortedItems.length} pages · {formatBytes(items.reduce((sum, item) => sum + item.size, 0))}
                   </span>
                   <span className="grid-status-hint desktop-only">
-                    Use the page menu to edit, duplicate or move a page.
+                    Open a page’s menu to reorder or delete it.
                   </span>
                 </div>
               )}
@@ -837,7 +854,7 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
                   <button
                     type="button"
                     className="btn-single-edit-action"
-                    onClick={() => setEditingItemId(activeInspectItem.id)}
+                    onClick={() => editPage(activeInspectItem.id)}
                     title="Edit image crop, rotation, and flip"
                   >
                     Edit Image
@@ -1439,11 +1456,13 @@ export function ImagesToPdfWorkspace({ onBackToHome }: ImagesToPdfWorkspaceProps
         item={editingItem}
         pageIndex={editingIndex}
         totalPages={sortedItems.length}
-        onClose={() => setEditingItemId(null)}
+        selectionProgress={editQueue && editQueue.ids.length > 1 ? { current: editQueue.index + 1, total: editQueue.ids.length } : undefined}
+        onClose={() => setEditQueue(null)}
         onApply={(edits) => {
-          if (editingItemId) {
-            documentSessionStore.updateItemEdits(TOOL_ID, editingItemId, edits);
-          }
+          if (!editQueue || !editingItemId) return;
+          documentSessionStore.updateItemEdits(TOOL_ID, editingItemId, edits);
+          const next = editQueue.index + 1;
+          setEditQueue(next < editQueue.ids.length ? { ...editQueue, index: next } : null);
         }}
       />
 

@@ -7,7 +7,7 @@ import {
   PdfOptions,
   PerPageOptions,
 } from "../types";
-import { generatePdf, inspectImageFile } from "./pdfEngine";
+import { generatePdf, inspectImageFile, MAX_FILES_LIMIT, MAX_TOTAL_BYTES_LIMIT } from "./pdfEngine";
 import { sortImageItems } from "./sort";
 
 export const DEFAULT_PDF_OPTIONS: PdfOptions = {
@@ -58,6 +58,63 @@ let activeAbortController: AbortController | null = null;
 
 function emit() {
   listeners.forEach((listener) => listener());
+}
+
+function duplicatePages(toolId: string, state: ToolSessionState, singleId?: string): string[] {
+  const targets = new Set(singleId === undefined ? state.selectedIds : [singleId]);
+  const displayed = sortImageItems(state.items, state.options.sort, state.options.manualOrder);
+  const sources = displayed.filter(item => targets.has(item.id));
+  if (!sources.length || state.items.length + sources.length > MAX_FILES_LIMIT) return [];
+  const bytes = state.items.reduce((sum, item) => sum + item.size, 0);
+  if (bytes + sources.reduce((sum, item) => sum + item.size, 0) > MAX_TOTAL_BYTES_LIMIT) return [];
+
+  const copies = new Map<string, ImageItem>();
+  try {
+    for (const source of sources) {
+      const copy = {
+        ...source,
+        id: `img_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+        name: source.name.includes(" (Copy)") ? source.name : source.name.replace(/(\.[^.]+)?$/, " (Copy)$1"),
+        crop: source.crop && { ...source.crop },
+        customOptions: source.customOptions && { ...source.customOptions },
+        objectUrl: URL.createObjectURL(source.file),
+      };
+      if (copy.customOptions && source.customOptions?.customMargins) {
+        copy.customOptions.customMargins = [...source.customOptions.customMargins];
+      }
+      copies.set(source.id, copy);
+    }
+  } catch (error) {
+    for (const copy of copies.values()) URL.revokeObjectURL(copy.objectUrl);
+    throw error;
+  }
+
+  const items = state.items.flatMap(item => {
+    const copy = copies.get(item.id);
+    return copy ? [item, copy] : [item];
+  });
+  const copyIds = Array.from(copies.values(), copy => copy.id);
+  let options = state.options;
+  if (singleId === undefined || options.sort === "manual") {
+    // Retain removed pages' ranks so Undo can restore them in their former positions.
+    const order = new Set(options.sort === "manual" ? options.manualOrder : []);
+    for (const item of displayed) order.add(item.id);
+    const manualOrder = Array.from(order).flatMap(id => {
+      const copy = copies.get(id);
+      return copy ? [id, copy.id] : [id];
+    });
+    options = { ...options, sort: "manual", manualOrder };
+  }
+  sessions[toolId] = {
+    ...state,
+    items,
+    options,
+    activeInspectId: copyIds[0],
+    selectedIds: singleId === undefined ? copyIds : state.selectedIds,
+    isOutdated: state.result !== null,
+  };
+  emit();
+  return copyIds;
 }
 
 export const documentSessionStore = {
@@ -333,50 +390,11 @@ export const documentSessionStore = {
   },
 
   duplicateItem(toolId: string, id: string): string {
-    const cur = this.getToolState(toolId);
-    const index = cur.items.findIndex((it) => it.id === id);
-    if (index === -1) return "";
+    return duplicatePages(toolId, this.getToolState(toolId), id)[0] || "";
+  },
 
-    const orig = cur.items[index];
-    const newId = `img_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    const cloned: ImageItem = {
-      ...orig,
-      objectUrl: URL.createObjectURL(orig.file),
-      id: newId,
-      name: orig.name.includes(" (Copy)")
-        ? orig.name
-        : orig.name.replace(/(\.[^.]+)$/, " (Copy)$1"),
-      crop: orig.crop ? { ...orig.crop } : undefined,
-      customOptions: orig.customOptions
-        ? {
-            ...orig.customOptions,
-            customMargins: orig.customOptions.customMargins
-              ? [...orig.customOptions.customMargins]
-              : undefined,
-          }
-        : undefined,
-    };
-
-    const newItems = [...cur.items];
-    newItems.splice(index + 1, 0, cloned);
-
-    let newManualOrder = cur.options.manualOrder;
-    if (cur.options.sort === "manual") {
-      const orderedIds = new Set(newManualOrder);
-      const appendedIds = cur.items.map(item => item.id).filter(itemId => !orderedIds.has(itemId));
-      newManualOrder = [...newManualOrder, ...appendedIds];
-      newManualOrder.splice(newManualOrder.indexOf(id) + 1, 0, newId);
-    }
-
-    sessions[toolId] = {
-      ...cur,
-      items: newItems,
-      activeInspectId: newId,
-      options: { ...cur.options, manualOrder: newManualOrder },
-      isOutdated: cur.result !== null,
-    };
-    emit();
-    return newId;
+  duplicateSelected(toolId: string): string[] {
+    return duplicatePages(toolId, this.getToolState(toolId));
   },
 
   removeItem(toolId: string, id: string) {

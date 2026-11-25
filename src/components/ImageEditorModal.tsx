@@ -15,6 +15,7 @@ interface ImageEditorModalProps {
   item: ImageItem | null;
   pageIndex: number;
   totalPages: number;
+  selectionProgress?: { current: number; total: number };
   isOpen: boolean;
   onClose: () => void;
   onApply: (edits: {
@@ -36,19 +37,12 @@ interface DragState {
   containerRect: DOMRect;
 }
 
-export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
-  item,
-  pageIndex,
-  totalPages,
-  isOpen,
-  onClose,
-  onApply,
-}) => {
+export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ item, isOpen, ...props }) => {
   if (!isOpen || !item) return null;
-  return <ImageEditor key={item.id} item={item} pageIndex={pageIndex} totalPages={totalPages} onClose={onClose} onApply={onApply} />;
+  return <ImageEditor key={item.id} item={item} {...props} />;
 };
 
-const ImageEditor = ({ item, pageIndex, totalPages, onClose, onApply }: Omit<ImageEditorModalProps, "item" | "isOpen"> & { item: ImageItem }) => {
+const ImageEditor = ({ item, pageIndex, totalPages, selectionProgress, onClose, onApply }: Omit<ImageEditorModalProps, "item" | "isOpen"> & { item: ImageItem }) => {
   const dialogRef = useDialogFocus<HTMLDivElement>(true, onClose);
 
   // Initial draft states
@@ -428,7 +422,6 @@ const ImageEditor = ({ item, pageIndex, totalPages, onClose, onApply }: Omit<Ima
       flipV: draftFlipV,
       crop: isFullCrop ? undefined : draftCrop,
     });
-    onClose();
   };
 
   return (
@@ -437,6 +430,7 @@ const ImageEditor = ({ item, pageIndex, totalPages, onClose, onApply }: Omit<Ima
       role="dialog"
       aria-modal="true"
       aria-labelledby="image-editor-title"
+      aria-describedby={selectionProgress ? "edit-selection-progress editor-page-description" : "editor-page-description"}
     >
       <div ref={dialogRef} className="image-editor-modal">
         {/* Modal Header */}
@@ -445,7 +439,10 @@ const ImageEditor = ({ item, pageIndex, totalPages, onClose, onApply }: Omit<Ima
             <h2 id="image-editor-title" className="editor-title">
               Edit image
             </h2>
-            <span className="editor-subtitle">
+            {selectionProgress && (
+              <span id="edit-selection-progress" className="edit-selection-progress">Selected image {selectionProgress.current} of {selectionProgress.total}</span>
+            )}
+            <span id="editor-page-description" className="editor-subtitle">
               Page {pageIndex + 1} of {totalPages} — {item.name}
             </span>
           </div>
@@ -744,7 +741,7 @@ const ImageEditor = ({ item, pageIndex, totalPages, onClose, onApply }: Omit<Ima
               onClick={handleApply}
             >
               <CheckIcon className="apply-check-svg" />
-              <span>Apply changes</span>
+              <span>{selectionProgress && selectionProgress.current < selectionProgress.total ? "Apply & next" : "Apply changes"}</span>
             </button>
           </div>
         </footer>

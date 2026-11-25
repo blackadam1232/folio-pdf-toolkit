@@ -1,22 +1,21 @@
 import React, { useEffect, useRef } from "react";
 import { ImageItem, PdfOptions } from "../types";
 import { calculateGeometry } from "../lib/layout";
-import { CheckIcon } from "./Icons";
+import { CopyIcon, EditIcon, RotateIcon, TrashIcon } from "./Icons";
 
 interface ThumbnailSheetProps {
   item: ImageItem;
   pageIndex: number;
   options: PdfOptions;
   isSelected: boolean;
-  isActiveInspect: boolean;
-  onToggleSelect: (id: string, e: React.MouseEvent) => void;
+  onToggleSelect: (id: string) => void;
   onInspect: (id: string) => void;
   onEdit: (id: string) => void;
   total: number;
   onMove: (direction: -1 | 1) => void;
   onRemove: () => void;
   onDuplicate: (id: string) => void;
-  onRotate?: (id: string, e?: React.MouseEvent) => void;
+  onRotate: (id: string) => void;
 }
 
 export const ThumbnailSheet: React.FC<ThumbnailSheetProps> = ({
@@ -24,7 +23,6 @@ export const ThumbnailSheet: React.FC<ThumbnailSheetProps> = ({
   pageIndex,
   options,
   isSelected,
-  isActiveInspect,
   onToggleSelect,
   onInspect,
   onEdit,
@@ -207,64 +205,45 @@ export const ThumbnailSheet: React.FC<ThumbnailSheetProps> = ({
       ref={containerRef}
       id={`page-card-${item.id}`}
       role="listitem"
-      className={`page-card ${isSelected ? "selected" : ""} ${
-        isActiveInspect ? "active-inspect" : ""
-      }`}
-      onClick={() => onInspect(item.id)}
-      title={`Page ${pageIndex + 1}: ${item.name} (Click to inspect)`}
+      className={`page-card${isSelected ? " selected" : ""}`}
+      aria-label={`Page ${pageIndex + 1}, ${item.name}`}
     >
-      {/* Selection Checkbox */}
-      <button
-        type="button"
-        role="checkbox"
-        aria-checked={isSelected}
-        className={`selection-check-circle ${isSelected ? "checked" : ""}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggleSelect(item.id, e);
-        }}
-        aria-label={`Select page ${pageIndex + 1}`}
-      >
-        {isSelected ? (
-          <CheckIcon className="check-svg" />
-        ) : (
-          <span className="uncheck-dot" />
-        )}
-      </button>
+      <label className="thumbnail-select">
+        <input type="checkbox" checked={isSelected} onChange={() => onToggleSelect(item.id)}
+          aria-label={`Select page ${pageIndex + 1}`} />
+      </label>
 
-      <details className="page-options" onClick={event => event.stopPropagation()}
+      <details className="page-options"
         onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }}
         onKeyDown={event => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}>
-        <summary aria-label={`Actions for page ${pageIndex + 1}`}>•••</summary>
+        <summary aria-label={`Actions for page ${pageIndex + 1}`} title="More page actions">⋮</summary>
         <div className="page-options-list" onClick={event => {
           const menu = event.currentTarget.closest("details");
           if (menu) { menu.open = false; menu.querySelector("summary")?.focus(); }
         }}>
           <button onClick={() => onInspect(item.id)}>Inspect page</button>
-          <button onClick={() => onEdit(item.id)}>Edit image</button>
-          <button onClick={() => onDuplicate(item.id)}>Duplicate</button>
-          <button onClick={() => onRotate?.(item.id)}>Rotate 90°</button>
           <button disabled={pageIndex === 0} onClick={() => onMove(-1)}>Move earlier</button>
           <button disabled={pageIndex + 1 === total} onClick={() => onMove(1)}>Move later</button>
-          <button onClick={onRemove}>Delete page</button>
+          <button type="button" className="page-action-delete" onClick={onRemove}><TrashIcon /> Delete page</button>
         </div>
       </details>
 
       {/* Miniature Paper Sheet container */}
-      <div className="sheet-backdrop">
-        <div
+      <button type="button" className="sheet-backdrop thumbnail-preview" onClick={() => onInspect(item.id)}
+        aria-label={`Inspect page ${pageIndex + 1}, ${item.name}`}>
+        <span
           className="sheet-paper"
           style={{
             aspectRatio: `${sheetAspect}`,
           }}
         >
           {layoutError ? (
-            <div className="sheet-error-notice">Margins exceed page</div>
+            <span className="sheet-error-notice">Margins exceed page</span>
           ) : (
             <canvas ref={canvasRef} className="sheet-canvas" />
           )}
-        </div>
-      </div>
+        </span>
+      </button>
 
       {/* Card bottom metadata */}
       <div className="card-meta">
@@ -287,6 +266,17 @@ export const ThumbnailSheet: React.FC<ThumbnailSheetProps> = ({
             Edited
           </span>
         )}
+      </div>
+      <div className="thumbnail-action-row">
+        <button type="button" onClick={() => onEdit(item.id)} aria-label={`Edit page ${pageIndex + 1}`}>
+          <EditIcon /><span>Edit</span>
+        </button>
+        <button type="button" onClick={() => onDuplicate(item.id)} aria-label={`Copy page ${pageIndex + 1}`} title="Duplicate this page">
+          <CopyIcon /><span>Copy</span>
+        </button>
+        <button type="button" onClick={() => onRotate(item.id)} aria-label={`Rotate page ${pageIndex + 1} clockwise 90 degrees`}>
+          <RotateIcon /><span>Rotate</span>
+        </button>
       </div>
     </div>
   );
